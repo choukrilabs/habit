@@ -26,6 +26,12 @@ interface HabitDao {
   @Query("SELECT * FROM habits WHERE groupName = :groupName AND status = 'ACTIVE' ORDER BY sortOrder ASC")
   fun observeActiveHabitsByGroup(groupName: String): Flow<List<HabitEntity>>
 
+  @Query("SELECT * FROM habits WHERE category = :category AND status = 'ACTIVE' ORDER BY sortOrder ASC")
+  fun observeActiveHabitsByCategory(category: String): Flow<List<HabitEntity>>
+
+  @Query("SELECT * FROM habits WHERE category = :category AND status = 'ACTIVE' ORDER BY sortOrder ASC")
+  suspend fun getActiveHabitsByCategory(category: String): List<HabitEntity>
+
   @Transaction
   @Query("SELECT * FROM habits ORDER BY sortOrder ASC, createdAt ASC")
   fun observeAllHabitsWithDetails(): Flow<List<HabitWithLogsAndDetails>>
@@ -104,6 +110,12 @@ interface EntryDao {
 
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun upsertEntries(entries: List<EntryEntity>)
+
+  @Query("SELECT COUNT(*) FROM entries WHERE status = 'DONE' AND date >= :startDate AND date <= :endDate")
+  fun observeCompletedEntryCountInRange(startDate: LocalDate, endDate: LocalDate): Flow<Int>
+
+  @Query("SELECT COUNT(*) FROM entries WHERE status = 'DONE' AND date >= :startDate AND date <= :endDate")
+  suspend fun getCompletedEntryCountInRange(startDate: LocalDate, endDate: LocalDate): Int
 
   @Query("DELETE FROM entries WHERE habitId = :habitId AND date = :date")
   suspend fun deleteEntry(habitId: String, date: LocalDate)
@@ -271,7 +283,7 @@ interface WidgetConfigDao {
     StepEntity::class,
     WidgetConfigEntity::class
   ],
-  version = 2,
+  version = 3,
   exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -297,6 +309,14 @@ abstract class HabitRadarDatabase : RoomDatabase() {
       }
     }
 
+    val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+      override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `habits` ADD COLUMN `category` TEXT")
+        db.execSQL("ALTER TABLE `habits` ADD COLUMN `tags` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_habits_category` ON `habits` (`category`)")
+      }
+    }
+
     fun getInstance(context: Context): HabitRadarDatabase {
       return INSTANCE ?: synchronized(this) {
         INSTANCE ?: Room.databaseBuilder(
@@ -304,7 +324,7 @@ abstract class HabitRadarDatabase : RoomDatabase() {
           HabitRadarDatabase::class.java,
           "habit_radar.db"
         )
-          .addMigrations(MIGRATION_1_2)
+          .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
           .fallbackToDestructiveMigration(dropAllTables = true)
           .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
           .build()

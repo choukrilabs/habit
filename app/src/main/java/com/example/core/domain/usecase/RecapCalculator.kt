@@ -1,5 +1,6 @@
 package com.example.core.domain.usecase
 
+import com.example.core.domain.model.DailyWeeklyPerformancePoint
 import com.example.core.domain.model.Entry
 import com.example.core.domain.model.EntryStatus
 import com.example.core.domain.model.Goal
@@ -9,6 +10,7 @@ import com.example.core.domain.model.HabitStatus
 import com.example.core.domain.model.Step
 import com.example.core.domain.model.TrackType
 import com.example.core.domain.model.WeekStartDay
+import com.example.core.domain.model.WeeklyPerformanceSummary
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -581,3 +583,138 @@ object RecapCalculator {
     )
   }
 }
+
+object WeeklyPerformanceCalculator {
+
+  fun calculate(
+    habits: List<Habit>,
+    entries: List<Entry>,
+    pauses: List<HabitPause>,
+    today: LocalDate,
+    weekStartDay: WeekStartDay = WeekStartDay.MONDAY,
+    weekOffset: Int = 0
+  ): WeeklyPerformanceSummary {
+    val activeHabits = habits.filter { it.status == HabitStatus.ACTIVE }
+    val weekStartDate = LogicalDateCalculator.startOfWeek(today, weekStartDay).plusWeeks(weekOffset.toLong())
+    val weekEndDate = weekStartDate.plusDays(6)
+
+    val entriesByHabit = entries.groupBy { it.habitId }.mapValues { (_, list) -> list.associateBy { it.date } }
+    val pausesByHabit = pauses.groupBy { it.habitId }
+
+    var elapsedCompleted = 0
+    var elapsedScheduled = 0
+    var perfectDaysCount = 0
+    var bestDayLabel: String? = null
+    var bestDayPercentage = 0
+
+    val dailyPoints = (0..6).map { offset ->
+      val date = weekStartDate.plusDays(offset.toLong())
+      val isToday = date == today
+      val isFuture = date.isAfter(today)
+      val shortLabel = ScheduleMatcher.dowShortLabel(date.dayOfWeek.value)
+
+      var dayCompleted = 0
+      var dayScheduled = 0
+
+      activeHabits.forEach { habit ->
+        val hPauses = pausesByHabit[habit.id].orEmpty()
+        if (ScheduleMatcher.isScheduledOn(habit, date, hPauses)) {
+          val entry = entriesByHabit[habit.id]?.get(date)
+          if (entry?.status != EntryStatus.SKIPPED) {
+            dayScheduled++
+            val done = ScheduleMatcher.isEntryDone(habit, entry)
+            if (done) {
+              dayCompleted++
+            }
+            if (!isFuture || done) {
+              elapsedScheduled++
+              if (done) elapsedCompleted++
+            }
+          }
+        }
+      }
+
+      val dayPct = if (dayScheduled > 0) {
+        ((dayCompleted.toDouble() / dayScheduled.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+      } else 0
+
+      if (!isFuture && dayScheduled > 0 && dayCompleted == dayScheduled) {
+        perfectDaysCount++
+      }
+      if (!isFuture && dayScheduled > 0 && (bestDayLabel == null || dayPct > bestDayPercentage)) {
+        bestDayPercentage = dayPct
+        bestDayLabel = shortLabel
+      }
+
+      DailyWeeklyPerformancePoint(
+        date = date,
+        dayShortLabel = shortLabel,
+        completedCount = dayCompleted,
+        scheduledCount = dayScheduled,
+        completionPercentage = dayPct,
+        isToday = isToday,
+        isFuture = isFuture
+      )
+    }
+
+    val completionPercentage = if (elapsedScheduled > 0) {
+      ((elapsedCompleted.toDouble() / elapsedScheduled.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+    } else 0
+
+    // Calculate previous week percentage for comparison delta
+    val prevWeekStart = weekStartDate.minusDays(7)
+    var prevCompleted = 0
+    var prevScheduled = 0
+    for (offset in 0..6) {
+      val date = prevWeekStart.plusDays(offset.toLong())
+      if (!date.isAfter(today)) {
+        activeHabits.forEach { habit ->
+          val hPauses = pausesByHabit[habit.id].orEmpty()
+          if (ScheduleMatcher.isScheduledOn(habit, date, hPauses)) {
+            val entry = entriesByHabit[habit.id]?.get(date)
+            if (entry?.status != EntryStatus.SKIPPED) {
+              prevScheduled++
+              if (ScheduleMatcher.isEntryDone(habit, entry)) {
+                prevCompleted++
+              }
+            }
+          }
+        }
+      }
+    }
+
+    val previousWeekPercentage = if (prevScheduled > 0) {
+      ((prevCompleted.toDouble() / prevScheduled.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+    } else 0
+
+    val deltaPercentage = if (prevScheduled > 0) {
+      completionPercentage - previousWeekPercentage
+    } else 0
+
+    val statusLabel = when {
+      activeHabits.isEmpty() || elapsedScheduled == 0 -> "Ready to start"
+      completionPercentage == 100 -> "Perfect Week"
+      completionPercentage >= 80 -> "Strong Rhythm"
+      completionPercentage >= 50 -> "On Track"
+      completionPercentage > 0 -> "Building Momentum"
+      else -> "Fresh Week"
+    }
+
+    return WeeklyPerformanceSummary(
+      weekStartDate = weekStartDate,
+      weekEndDate = weekEndDate,
+      completionPercentage = completionPercentage,
+      previousWeekPercentage = previousWeekPercentage,
+      deltaPercentage = deltaPercentage,
+      completedCount = elapsedCompleted,
+      scheduledCount = elapsedScheduled,
+      activeHabitsCount = activeHabits.size,
+      perfectDaysCount = perfectDaysCount,
+      bestDayLabel = bestDayLabel,
+      bestDayPercentage = bestDayPercentage,
+      statusLabel = statusLabel,
+      dailyBreakdown = dailyPoints
+    )
+  }
+}
+

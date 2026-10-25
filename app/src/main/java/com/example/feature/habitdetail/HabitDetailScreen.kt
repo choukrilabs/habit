@@ -43,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import com.example.feature.milestones.HabitMilestoneBadgeShelf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -58,6 +59,7 @@ import com.example.core.domain.model.AppSettings
 import com.example.core.domain.model.Entry
 import com.example.core.domain.model.EntryStatus
 import com.example.core.domain.model.Habit
+import com.example.core.domain.model.HabitCompletionLog
 import com.example.core.domain.model.HabitPause
 import com.example.core.domain.model.HabitStatus
 import com.example.core.domain.model.Reminder
@@ -83,7 +85,10 @@ import com.example.core.ui.theme.InstrumentSerifFamily
 import com.example.core.ui.theme.LocalHabitRadarColors
 import com.example.core.ui.theme.PlusJakartaSansFamily
 import com.example.core.ui.theme.habitTint
+import com.example.feature.habit.HabitCompletionLogBottomSheet
+import com.example.feature.habit.HabitCompletionLogCard
 import com.example.feature.habit.ReminderEditorBottomSheet
+import com.example.feature.milestones.HabitMilestoneBadgeShelf
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.YearMonth
@@ -118,7 +123,14 @@ fun HabitDetailScreen(
   onMakeGoalFromHabit: () -> Unit,
   onSaveReminder: (Reminder) -> Unit,
   onDeleteReminder: (String) -> Unit,
-  onToggleAllReminders: (Boolean) -> Unit
+  onToggleAllReminders: (Boolean) -> Unit,
+  onLogCompletion: (HabitCompletionLog) -> Unit = { log ->
+    if (log.status == EntryStatus.SKIPPED) {
+      onSkipDate(log.resolvedDate)
+    } else {
+      onToggleDate(log.resolvedDate, log.note)
+    }
+  }
 ) {
   val colors = LocalHabitRadarColors.current
   val tint = habitTint(habit.colorKey, colors.isDark)
@@ -440,6 +452,30 @@ fun HabitDetailScreen(
               )
             }
           }
+        }
+      }
+
+      // SECTION A1.5. PER-HABIT MILESTONE BADGE SHELF
+      item(key = "sec_a1_5_habit_milestone_badges") {
+        HabitMilestoneBadgeShelf(
+          habit = habit,
+          entries = entries,
+          pauses = pauses,
+          today = today
+        )
+      }
+
+      // SECTION A2. DATE-STAMPED COMPLETION LOGGER
+      if (!isArchived) {
+        item(key = "sec_a2_completion_logger") {
+          HabitCompletionLogCard(
+            habit = habit,
+            entries = entries,
+            pauses = pauses,
+            today = today,
+            onLogCompletion = onLogCompletion,
+            onClearDate = onDeleteDateEntry
+          )
         }
       }
 
@@ -868,6 +904,10 @@ fun HabitDetailScreen(
             Text("No entries recorded yet.", fontSize = 13.sp, color = colors.textSecondary)
           } else {
             sortedHistory.forEach { e ->
+              val timeStr = e.completedAt?.let { inst ->
+                val lt = inst.atZone(ZoneId.systemDefault()).toLocalTime()
+                String.format(Locale.US, " · %02d:%02d", lt.hour, lt.minute)
+              } ?: ""
               Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -878,7 +918,7 @@ fun HabitDetailScreen(
               ) {
                 Column(modifier = Modifier.weight(1f)) {
                   Text(
-                    text = e.date.format(DateTimeFormatter.ofPattern("EEE, d MMM yyyy")),
+                    text = "${e.date.format(DateTimeFormatter.ofPattern("EEE, d MMM yyyy"))} (${e.dateStamp}$timeStr)",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     color = colors.textPrimary
@@ -897,8 +937,13 @@ fun HabitDetailScreen(
                     .background(tint.subtleElementBg)
                     .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
+                  val badgeLabel = when {
+                    e.status == EntryStatus.SKIPPED -> "Skipped"
+                    habit.trackType != TrackType.TASK && e.value != null -> "${e.value.roundToInt()} ${habit.unit ?: ""}".trim()
+                    else -> "Done"
+                  }
                   Text(
-                    text = if (e.status == EntryStatus.SKIPPED) "Skipped" else "Done",
+                    text = badgeLabel,
                     fontSize = 12.sp,
                     color = tint.baseColor
                   )
@@ -1050,21 +1095,19 @@ fun HabitDetailScreen(
 
   if (selectedDaySheetDate != null) {
     val date = selectedDaySheetDate!!
-    val existing = entriesMap[date]
-    DayEntryEditorSheet(
-      date = date,
-      existingEntry = existing,
+    HabitCompletionLogBottomSheet(
+      habit = habit,
+      initialDate = date,
+      entries = entries,
+      pauses = pauses,
+      today = today,
       onDismiss = { selectedDaySheetDate = null },
-      onMarkDone = { note ->
-        onToggleDate(date, note)
+      onSaveLog = { log ->
+        onLogCompletion(log)
         selectedDaySheetDate = null
       },
-      onMarkSkipped = {
-        onSkipDate(date)
-        selectedDaySheetDate = null
-      },
-      onClear = {
-        onDeleteDateEntry(date)
+      onClearDate = { targetDate ->
+        onDeleteDateEntry(targetDate)
         selectedDaySheetDate = null
       }
     )

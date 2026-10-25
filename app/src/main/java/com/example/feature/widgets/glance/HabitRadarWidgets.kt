@@ -65,6 +65,7 @@ import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.action.actionSendBroadcast
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.lazy.LazyColumn as GlanceLazyColumn
@@ -121,7 +122,10 @@ import com.example.core.ui.theme.PlusJakartaSansFamily
 import com.example.core.ui.theme.parseHexColor
 import java.time.LocalDate
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 enum class WidgetCircleVisualState {
   DONE,
@@ -169,50 +173,423 @@ object WidgetBitmapRenderer {
     when (state) {
       WidgetCircleVisualState.DONE -> {
         paint.style = Paint.Style.FILL
-        paint.color = android.graphics.Color.argb(230, red, green, blue)
+        paint.color = android.graphics.Color.argb(245, red, green, blue)
         canvas.drawCircle(cx, cy, r, paint)
 
         // Dark checkmark
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = sizePx * 0.09f
+        paint.strokeWidth = sizePx * 0.095f
         paint.strokeCap = Paint.Cap.ROUND
-        paint.color = android.graphics.Color.rgb(18, 19, 23)
-        canvas.drawLine(sizePx * 0.30f, sizePx * 0.52f, sizePx * 0.45f, sizePx * 0.66f, paint)
-        canvas.drawLine(sizePx * 0.45f, sizePx * 0.66f, sizePx * 0.72f, sizePx * 0.36f, paint)
+        paint.strokeJoin = Paint.Join.ROUND
+        paint.color = android.graphics.Color.rgb(17, 18, 22)
+        canvas.drawLine(sizePx * 0.30f, sizePx * 0.52f, sizePx * 0.44f, sizePx * 0.66f, paint)
+        canvas.drawLine(sizePx * 0.44f, sizePx * 0.66f, sizePx * 0.71f, sizePx * 0.36f, paint)
       }
       WidgetCircleVisualState.TODAY_PENDING -> {
+        paint.style = Paint.Style.FILL
+        paint.color = android.graphics.Color.argb(30, red, green, blue)
+        canvas.drawCircle(cx, cy, r, paint)
+
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = sizePx * 0.085f
+        paint.color = android.graphics.Color.argb(240, red, green, blue)
+        canvas.drawCircle(cx, cy, r - (sizePx * 0.04f), paint)
+      }
+      WidgetCircleVisualState.PAST_MISSED,
+      WidgetCircleVisualState.NOT_SCHEDULED,
+      WidgetCircleVisualState.FUTURE -> {
+        paint.style = Paint.Style.FILL
+        paint.color = android.graphics.Color.argb(54, red, green, blue)
+        canvas.drawCircle(cx, cy, r, paint)
+      }
+      WidgetCircleVisualState.SKIPPED -> {
         paint.style = Paint.Style.FILL
         paint.color = android.graphics.Color.argb(48, red, green, blue)
         canvas.drawCircle(cx, cy, r, paint)
 
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = sizePx * 0.07f
-        paint.color = android.graphics.Color.argb(245, red, green, blue)
-        canvas.drawCircle(cx, cy, r - 2f, paint)
-      }
-      WidgetCircleVisualState.PAST_MISSED -> {
-        paint.style = Paint.Style.FILL
-        paint.color = android.graphics.Color.argb(52, red, green, blue)
-        canvas.drawCircle(cx, cy, r, paint)
-      }
-      WidgetCircleVisualState.SKIPPED -> {
-        paint.style = Paint.Style.FILL
-        paint.color = android.graphics.Color.argb(45, red, green, blue)
-        canvas.drawCircle(cx, cy, r, paint)
-
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = sizePx * 0.07f
+        paint.strokeWidth = sizePx * 0.075f
         paint.strokeCap = Paint.Cap.ROUND
         paint.color = android.graphics.Color.argb(200, red, green, blue)
         canvas.drawLine(sizePx * 0.34f, cy, sizePx * 0.66f, cy, paint)
       }
-      WidgetCircleVisualState.NOT_SCHEDULED, WidgetCircleVisualState.FUTURE -> {
-        paint.style = Paint.Style.FILL
-        paint.color = android.graphics.Color.argb(26, red, green, blue)
-        canvas.drawCircle(cx, cy, r, paint)
+    }
+    return bmp
+  }
+
+  fun renderWeekDayCircleBitmap(
+    isDone: Boolean,
+    isToday: Boolean,
+    habitColorInt: Int,
+    sizePx: Int = 84
+  ): Bitmap {
+    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val cx = sizePx / 2f
+    val cy = sizePx / 2f
+    val r = (sizePx / 2f) - 5f
+
+    val red = android.graphics.Color.red(habitColorInt)
+    val green = android.graphics.Color.green(habitColorInt)
+    val blue = android.graphics.Color.blue(habitColorInt)
+
+    if (isDone) {
+      paint.style = Paint.Style.FILL
+      paint.color = android.graphics.Color.argb(245, red, green, blue)
+      canvas.drawCircle(cx, cy, r, paint)
+
+      paint.style = Paint.Style.STROKE
+      paint.strokeWidth = sizePx * 0.095f
+      paint.strokeCap = Paint.Cap.ROUND
+      paint.color = android.graphics.Color.rgb(14, 21, 16)
+      canvas.drawLine(sizePx * 0.30f, sizePx * 0.52f, sizePx * 0.44f, sizePx * 0.66f, paint)
+      canvas.drawLine(sizePx * 0.44f, sizePx * 0.66f, sizePx * 0.71f, sizePx * 0.36f, paint)
+    } else {
+      paint.style = Paint.Style.STROKE
+      paint.strokeWidth = if (isToday) sizePx * 0.08f else sizePx * 0.06f
+      paint.color = if (isToday) {
+        android.graphics.Color.argb(245, red, green, blue)
+      } else {
+        android.graphics.Color.argb(110, red, green, blue)
+      }
+      canvas.drawCircle(cx, cy, r - paint.strokeWidth / 2f, paint)
+    }
+    return bmp
+  }
+
+  fun renderCheckButtonBitmap(
+    isDone: Boolean,
+    habitColorInt: Int,
+    sizePx: Int = 88
+  ): Bitmap {
+    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val cx = sizePx / 2f
+    val cy = sizePx / 2f
+    val r = (sizePx / 2f) - 2f
+
+    val red = android.graphics.Color.red(habitColorInt)
+    val green = android.graphics.Color.green(habitColorInt)
+    val blue = android.graphics.Color.blue(habitColorInt)
+
+    paint.style = Paint.Style.FILL
+    paint.color = if (isDone) {
+      android.graphics.Color.argb(245, red, green, blue)
+    } else {
+      android.graphics.Color.argb(54, red, green, blue)
+    }
+    canvas.drawCircle(cx, cy, r, paint)
+
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = sizePx * 0.085f
+    paint.strokeCap = Paint.Cap.ROUND
+    paint.color = if (isDone) {
+      android.graphics.Color.rgb(14, 21, 16)
+    } else {
+      android.graphics.Color.rgb(194, 212, 198)
+    }
+    canvas.drawLine(sizePx * 0.31f, sizePx * 0.52f, sizePx * 0.45f, sizePx * 0.66f, paint)
+    canvas.drawLine(sizePx * 0.45f, sizePx * 0.66f, sizePx * 0.70f, sizePx * 0.37f, paint)
+    return bmp
+  }
+
+  fun renderHabitIconBadgeBitmap(
+    iconKey: String,
+    habitColorInt: Int,
+    sizePx: Int = 84
+  ): Bitmap {
+    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val red = android.graphics.Color.red(habitColorInt)
+    val green = android.graphics.Color.green(habitColorInt)
+    val blue = android.graphics.Color.blue(habitColorInt)
+
+    val corner = sizePx * 0.28f
+    paint.style = Paint.Style.FILL
+    paint.color = android.graphics.Color.argb(52, red, green, blue)
+    canvas.drawRoundRect(RectF(0f, 0f, sizePx.toFloat(), sizePx.toFloat()), corner, corner, paint)
+
+    drawHabitIconOnCanvas(
+      canvas = canvas,
+      iconKey = iconKey,
+      colorInt = android.graphics.Color.argb(255, red, green, blue),
+      cx = sizePx / 2f,
+      cy = sizePx / 2f,
+      radius = sizePx * 0.28f
+    )
+    return bmp
+  }
+
+  fun renderHeatmapGridBitmap(
+    habit: Habit,
+    entriesMap: Map<LocalDate, Entry>,
+    today: LocalDate,
+    weekDays: List<LocalDate>,
+    habitColorInt: Int,
+    columns: Int = 15,
+    widthPx: Int = 660,
+    heightPx: Int = 270
+  ): Bitmap {
+    val bmp = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+
+    val red = android.graphics.Color.red(habitColorInt)
+    val green = android.graphics.Color.green(habitColorInt)
+    val blue = android.graphics.Color.blue(habitColorInt)
+    val activeColor = android.graphics.Color.argb(245, red, green, blue)
+    val inactiveColor = android.graphics.Color.argb(44, red, green, blue)
+
+    val rows = 7
+    val gap = widthPx * 0.012f
+    val totalGapX = gap * (columns - 1)
+    val cellW = (widthPx - totalGapX) / columns
+    val totalGapY = gap * (rows - 1)
+    val cellH = (heightPx - totalGapY) / rows
+    val cellSize = minOf(cellW, cellH)
+    val corner = cellSize * 0.28f
+
+    val weekEnd = weekDays.lastOrNull() ?: today
+    val doneToday = ScheduleMatcher.isEntryDone(habit, entriesMap[today])
+
+    for (col in 0 until columns) {
+      val x = col * (cellW + gap)
+      for (row in 0 until rows) {
+        val y = row * (cellH + gap)
+        val daysAgo = (columns - 1 - col) * 7 + (rows - 1 - row)
+        val cellDate = weekEnd.minusDays(daysAgo.toLong())
+        val isBottomRight = col == columns - 1 && row == rows - 1
+        val isDone = ScheduleMatcher.isEntryDone(habit, entriesMap[cellDate]) ||
+          (isBottomRight && (doneToday || entriesMap.isEmpty()))
+        paint.color = if (isDone) activeColor else inactiveColor
+        canvas.drawRoundRect(
+          RectF(x, y, x + cellW, y + cellH),
+          corner,
+          corner,
+          paint
+        )
       }
     }
     return bmp
+  }
+
+  fun renderHabitRingWithBadgeBitmap(
+    iconKey: String,
+    habitColorInt: Int,
+    progressFraction: Float,
+    streak: Int,
+    showStreak: Boolean,
+    sizePx: Int = 160
+  ): Bitmap {
+    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    val red = android.graphics.Color.red(habitColorInt)
+    val green = android.graphics.Color.green(habitColorInt)
+    val blue = android.graphics.Color.blue(habitColorInt)
+
+    val stroke = sizePx * 0.095f
+    val pad = stroke * 0.9f
+    val rect = RectF(pad, pad, sizePx - pad, sizePx - pad)
+
+    val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      style = Paint.Style.STROKE
+      strokeWidth = stroke
+      strokeCap = Paint.Cap.ROUND
+    }
+
+    // Track circle
+    ringPaint.color = android.graphics.Color.argb(56, red, green, blue)
+    canvas.drawArc(rect, 0f, 360f, false, ringPaint)
+
+    // Progress arc
+    val clamped = progressFraction.coerceIn(0f, 1f)
+    if (clamped > 0f) {
+      ringPaint.color = android.graphics.Color.argb(255, red, green, blue)
+      val sweep = (clamped * 360f).coerceAtLeast(24f)
+      canvas.drawArc(rect, -90f, sweep, false, ringPaint)
+    }
+
+    // Centered habit icon
+    drawHabitIconOnCanvas(
+      canvas = canvas,
+      iconKey = iconKey,
+      colorInt = android.graphics.Color.argb(255, red, green, blue),
+      cx = sizePx / 2f,
+      cy = sizePx / 2f,
+      radius = sizePx * 0.19f
+    )
+
+    // White pill badge at bottom-right when streak > 0
+    if (showStreak && streak > 0) {
+      val badgeText = "🔥 $streak"
+      val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(17, 17, 20)
+        textSize = sizePx * 0.165f
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+      }
+      val textWidth = textPaint.measureText(badgeText)
+      val badgeH = sizePx * 0.25f
+      val badgeW = (textWidth + sizePx * 0.16f).coerceAtLeast(sizePx * 0.44f)
+      val badgeRight = sizePx * 0.98f
+      val badgeBottom = sizePx * 0.97f
+      val badgeLeft = badgeRight - badgeW
+      val badgeTop = badgeBottom - badgeH
+
+      val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = android.graphics.Color.WHITE
+      }
+      val pillRect = RectF(badgeLeft, badgeTop, badgeRight, badgeBottom)
+      canvas.drawRoundRect(pillRect, badgeH / 2f, badgeH / 2f, pillPaint)
+
+      val textY = pillRect.centerY() + (textPaint.textSize * 0.35f)
+      canvas.drawText(badgeText, pillRect.centerX(), textY, textPaint)
+    }
+    return bmp
+  }
+
+  private fun drawHabitIconOnCanvas(
+    canvas: Canvas,
+    iconKey: String,
+    colorInt: Int,
+    cx: Float,
+    cy: Float,
+    radius: Float
+  ) {
+    if (iconKey.startsWith("emoji:")) {
+      val emoji = iconKey.removePrefix("emoji:")
+      val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = radius * 1.55f
+        textAlign = Paint.Align.CENTER
+      }
+      canvas.drawText(emoji, cx, cy + emojiPaint.textSize * 0.35f, emojiPaint)
+      return
+    }
+
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = colorInt
+      style = Paint.Style.STROKE
+      strokeWidth = (radius * 0.20f).coerceAtLeast(2.4f)
+      strokeCap = Paint.Cap.ROUND
+      strokeJoin = Paint.Join.ROUND
+    }
+    val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = colorInt
+      style = Paint.Style.FILL
+    }
+
+    when (iconKey) {
+      "walk", "run" -> {
+        // Head
+        canvas.drawCircle(cx + radius * 0.1f, cy - radius * 0.62f, radius * 0.20f, fillPaint)
+        // Torso
+        canvas.drawLine(cx + radius * 0.05f, cy - radius * 0.35f, cx - radius * 0.08f, cy + radius * 0.18f, paint)
+        // Arms
+        canvas.drawLine(cx - radius * 0.38f, cy - radius * 0.05f, cx + radius * 0.05f, cy - radius * 0.30f, paint)
+        canvas.drawLine(cx + radius * 0.05f, cy - radius * 0.30f, cx + radius * 0.42f, cy - radius * 0.08f, paint)
+        // Legs
+        canvas.drawLine(cx - radius * 0.08f, cy + radius * 0.18f, cx - radius * 0.38f, cy + radius * 0.72f, paint)
+        canvas.drawLine(cx - radius * 0.08f, cy + radius * 0.18f, cx + radius * 0.34f, cy + radius * 0.72f, paint)
+      }
+      "moon", "night" -> {
+        val path = android.graphics.Path()
+        val r = radius * 0.75f
+        path.addCircle(cx, cy, r, android.graphics.Path.Direction.CW)
+        val cut = android.graphics.Path()
+        cut.addCircle(cx + r * 0.45f, cy - r * 0.25f, r * 0.75f, android.graphics.Path.Direction.CW)
+        path.op(cut, android.graphics.Path.Op.DIFFERENCE)
+        canvas.drawPath(path, fillPaint)
+      }
+      "savings", "wallet" -> {
+        // Piggy / coin body
+        canvas.drawRoundRect(
+          RectF(cx - radius * 0.72f, cy - radius * 0.45f, cx + radius * 0.72f, cy + radius * 0.52f),
+          radius * 0.45f,
+          radius * 0.45f,
+          paint
+        )
+        // Coin slot on top
+        canvas.drawLine(cx - radius * 0.25f, cy - radius * 0.70f, cx + radius * 0.25f, cy - radius * 0.70f, paint)
+        // Eye dot
+        canvas.drawCircle(cx + radius * 0.30f, cy - radius * 0.10f, radius * 0.10f, fillPaint)
+      }
+      "sunrise" -> {
+        // Horizon line
+        canvas.drawLine(cx - radius * 0.80f, cy + radius * 0.35f, cx + radius * 0.80f, cy + radius * 0.35f, paint)
+        // Sun semi-circle
+        canvas.drawArc(
+          RectF(cx - radius * 0.48f, cy - radius * 0.13f, cx + radius * 0.48f, cy + radius * 0.83f),
+          180f,
+          180f,
+          false,
+          paint
+        )
+        // Top rays
+        canvas.drawLine(cx, cy - radius * 0.65f, cx, cy - radius * 0.35f, paint)
+        canvas.drawLine(cx - radius * 0.52f, cy - radius * 0.42f, cx - radius * 0.32f, cy - radius * 0.22f, paint)
+        canvas.drawLine(cx + radius * 0.52f, cy - radius * 0.42f, cx + radius * 0.32f, cy - radius * 0.22f, paint)
+      }
+      "sun" -> {
+        canvas.drawCircle(cx, cy, radius * 0.38f, fillPaint)
+        for (i in 0 until 8) {
+          val a = Math.toRadians((i * 45).toDouble())
+          val x1 = cx + kotlin.math.cos(a).toFloat() * radius * 0.56f
+          val y1 = cy + kotlin.math.sin(a).toFloat() * radius * 0.56f
+          val x2 = cx + kotlin.math.cos(a).toFloat() * radius * 0.82f
+          val y2 = cy + kotlin.math.sin(a).toFloat() * radius * 0.82f
+          canvas.drawLine(x1, y1, x2, y2, paint)
+        }
+      }
+      "book", "study", "journal" -> {
+        val w = radius * 0.78f
+        val h = radius * 0.62f
+        canvas.drawRoundRect(RectF(cx - w, cy - h, cx, cy + h), radius * 0.12f, radius * 0.12f, paint)
+        canvas.drawRoundRect(RectF(cx, cy - h, cx + w, cy + h), radius * 0.12f, radius * 0.12f, paint)
+      }
+      "charity", "heart" -> {
+        val path = android.graphics.Path()
+        val r = radius * 0.72f
+        path.moveTo(cx, cy + r * 0.75f)
+        path.cubicTo(cx - r * 1.2f, cy + r * 0.05f, cx - r * 0.9f, cy - r * 0.85f, cx, cy - r * 0.25f)
+        path.cubicTo(cx + r * 0.9f, cy - r * 0.85f, cx + r * 1.2f, cy + r * 0.05f, cx, cy + r * 0.75f)
+        path.close()
+        canvas.drawPath(path, fillPaint)
+      }
+      "workout" -> {
+        // Dumbbell bar
+        canvas.drawLine(cx - radius * 0.68f, cy, cx + radius * 0.68f, cy, paint)
+        // Left & right weights
+        canvas.drawLine(cx - radius * 0.52f, cy - radius * 0.45f, cx - radius * 0.52f, cy + radius * 0.45f, paint)
+        canvas.drawLine(cx + radius * 0.52f, cy - radius * 0.45f, cx + radius * 0.52f, cy + radius * 0.45f, paint)
+      }
+      "water" -> {
+        val path = android.graphics.Path()
+        path.moveTo(cx, cy - radius * 0.78f)
+        path.quadTo(cx + radius * 0.68f, cy + radius * 0.05f, cx, cy + radius * 0.78f)
+        path.quadTo(cx - radius * 0.68f, cy + radius * 0.05f, cx, cy - radius * 0.78f)
+        path.close()
+        canvas.drawPath(path, fillPaint)
+      }
+      else -> {
+        // Crisp 4-point star / sparkle
+        val path = android.graphics.Path()
+        val rOut = radius * 0.78f
+        val rIn = radius * 0.28f
+        for (i in 0 until 8) {
+          val r = if (i % 2 == 0) rOut else rIn
+          val a = Math.toRadians((i * 45 - 90).toDouble())
+          val x = cx + kotlin.math.cos(a).toFloat() * r
+          val y = cy + kotlin.math.sin(a).toFloat() * r
+          if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        canvas.drawPath(path, fillPaint)
+      }
+    }
   }
 
   fun renderProgressRingBitmap(
@@ -251,6 +628,24 @@ object WidgetParams {
   val DateStrKey = ActionParameters.Key<String>("date_str")
   val StepIdKey = ActionParameters.Key<String>("step_id")
   val GoalIdKey = ActionParameters.Key<String>("goal_id")
+  val MarkDoneOnlyKey = ActionParameters.Key<Boolean>("mark_done_only")
+}
+
+class MarkHabitDoneWidgetAction : ActionCallback {
+  override suspend fun onAction(
+    context: Context,
+    glanceId: GlanceId,
+    parameters: ActionParameters
+  ) {
+    val habitId = parameters[WidgetParams.HabitIdKey] ?: return
+    val dateStr = parameters[WidgetParams.DateStrKey]
+    val container = context.appContainer
+    val repo = container.repository
+    val date = dateStr?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+      ?: repo.getLogicalToday()
+    repo.markHabitDoneOnDate(habitId, date)
+    WidgetUpdater.updateAll(context)
+  }
 }
 
 class ToggleHabitWidgetAction : ActionCallback {
@@ -260,24 +655,19 @@ class ToggleHabitWidgetAction : ActionCallback {
     parameters: ActionParameters
   ) {
     val habitId = parameters[WidgetParams.HabitIdKey] ?: return
-    val dateStr = parameters[WidgetParams.DateStrKey] ?: return
-    val date = runCatching { LocalDate.parse(dateStr) }.getOrNull() ?: return
-
+    val dateStr = parameters[WidgetParams.DateStrKey]
+    val markDoneOnly = parameters[WidgetParams.MarkDoneOnlyKey] ?: false
     val container = context.appContainer
-    val db = container.database
     val repo = container.repository
-    val habit = db.habitDao().getHabitById(habitId)?.toDomain() ?: return
+    val date = dateStr?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+      ?: repo.getLogicalToday()
 
-    if (habit.trackType == TrackType.TASK) {
-      repo.toggleTaskEntry(habitId, date)
-      WidgetUpdater.updateAll(context)
+    if (markDoneOnly) {
+      repo.markHabitDoneOnDate(habitId, date)
     } else {
-      val openIntent = Intent(context, MainActivity::class.java).apply {
-        data = Uri.parse("habitradar://habit/$habitId")
-        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-      }
-      context.startActivity(openIntent)
+      repo.toggleHabitDoneOnDate(habitId, date)
     }
+    WidgetUpdater.updateAll(context)
   }
 }
 
@@ -290,10 +680,8 @@ class ToggleStepWidgetAction : ActionCallback {
     val stepId = parameters[WidgetParams.StepIdKey] ?: return
     val goalId = parameters[WidgetParams.GoalIdKey] ?: return
     val container = context.appContainer
-    val db = container.database
     val repo = container.repository
-    val step = db.goalDao().getStepsForGoal(goalId).map { it.toDomain() }.firstOrNull { it.id == stepId } ?: return
-    repo.toggleManualStep(step)
+    repo.toggleStepDone(stepId, goalId)
     WidgetUpdater.updateAll(context)
   }
 }
@@ -335,16 +723,25 @@ private data class WidgetSnapshot(
   val weekDays: List<LocalDate>,
   val accentColor: String,
   val allowBackfill: Boolean,
+  val showStreak: Boolean,
+  val hideNames: Boolean,
   val dayRun: Int
 )
 
-private suspend fun loadWidgetSnapshot(context: Context): WidgetSnapshot {
+private suspend fun loadWidgetSnapshot(context: Context, glanceId: GlanceId? = null): WidgetSnapshot {
   val container = context.appContainer
   val db = container.database
   val settings = container.settingsDataStore.getSettings()
   val today = LogicalDateCalculator.now(settings.dayRollover)
   val weekStartDate = LogicalDateCalculator.startOfWeek(today, settings.weekStart)
   val weekDays = (0..6).map { weekStartDate.plusDays(it.toLong()) }
+
+  val widgetConfig = glanceId?.let { id ->
+    runCatching {
+      val appWidgetId = GlanceAppWidgetManager(context).getAppWidgetId(id)
+      db.widgetConfigDao().getConfig(appWidgetId)?.toDomain()
+    }.getOrNull()
+  }
 
   val allHabits = db.habitDao().getAllHabits().map { it.toDomain() }
   val allEntries = db.entryDao().getAllEntries().map { it.toDomain() }
@@ -353,9 +750,12 @@ private suspend fun loadWidgetSnapshot(context: Context): WidgetSnapshot {
   val entriesByHabitList = allEntries.groupBy { it.habitId }
   val entriesByHabitMap = entriesByHabitList.mapValues { (_, list) -> list.associateBy { it.date } }
 
+  val configuredHabitIds = widgetConfig?.habitIds?.toSet().orEmpty()
   val activeHabits = allHabits.filter { h ->
-    h.status == HabitStatus.ACTIVE && !ScheduleMatcher.isPausedOn(today, pausesByHabit[h.id].orEmpty())
-  }
+    h.status == HabitStatus.ACTIVE &&
+      !ScheduleMatcher.isPausedOn(today, pausesByHabit[h.id].orEmpty()) &&
+      (configuredHabitIds.isEmpty() || h.id in configuredHabitIds)
+  }.sortedBy { it.sortOrder }
 
   val streaks = activeHabits.associate { h ->
     val s = StreakCalculator.calculateStreaks(
@@ -381,46 +781,48 @@ private suspend fun loadWidgetSnapshot(context: Context): WidgetSnapshot {
     today = today,
     weekDays = weekDays,
     accentColor = settings.accentColor,
-    allowBackfill = settings.defaultWidgetAllowBackfill,
+    allowBackfill = widgetConfig?.allowBackfill ?: settings.defaultWidgetAllowBackfill,
+    showStreak = widgetConfig?.showStreak ?: settings.defaultWidgetShowStreak,
+    hideNames = widgetConfig?.hideNames ?: settings.defaultWidgetHideNames,
     dayRun = dayRun
   )
 }
 
-// 1. WEEK GRID WIDGET (Reference Design — Section 5.16 C)
+// 1. HABIT LIST WIDGET ("Habit List — up to 10 habits with this week's days (medium & large)")
 class WeekGridGlanceWidget : GlanceAppWidget() {
   override val sizeMode: SizeMode = SizeMode.Responsive(
     setOf(DpSize(180.dp, 110.dp), DpSize(250.dp, 180.dp), DpSize(320.dp, 300.dp))
   )
 
   override suspend fun provideGlance(context: Context, id: GlanceId) {
-    val snap = loadWidgetSnapshot(context)
+    val snap = loadWidgetSnapshot(context, id)
     provideContent {
       val size = LocalSize.current
-      val isCompactNarrow = size.width < 245.dp
+      val isCompactNarrow = size.width < 220.dp
       GlanceColumn(
         modifier = GlanceModifier
           .fillMaxSize()
-          .cornerRadius(28.dp)
-          .background(Color(0xFF1B1B1F))
+          .cornerRadius(24.dp)
+          .background(Color(0xFF141416))
           .padding(14.dp)
       ) {
-        // Header row: Mo Tu We Th Fr Sa Su
+        // Header row: Mo Tu We Th Fr Sa Su aligned over the 7 day circles (Screenshot 2)
         if (!isCompactNarrow) {
           GlanceRow(
             verticalAlignment = GlanceAlignment.CenterVertically,
-            modifier = GlanceModifier.fillMaxWidth().padding(bottom = 8.dp)
+            modifier = GlanceModifier.fillMaxWidth().padding(bottom = 6.dp)
           ) {
             GlanceSpacer(modifier = GlanceModifier.defaultWeight())
             snap.weekDays.forEach { d ->
               val isToday = d == snap.today
               GlanceBox(
                 contentAlignment = GlanceAlignment.Center,
-                modifier = GlanceModifier.width(32.dp)
+                modifier = GlanceModifier.width(24.dp)
               ) {
                 GlanceText(
                   text = ScheduleMatcher.dowShortLabel(d.dayOfWeek.value).take(2),
                   style = GlanceTextStyle(
-                    color = ColorProvider(if (isToday) Color.White else Color(0xFF8E8F98)),
+                    color = ColorProvider(if (isToday) Color.White else Color(0xFF7E7E86)),
                     fontSize = 11.sp,
                     fontWeight = if (isToday) GlanceFontWeight.Bold else GlanceFontWeight.Medium
                   )
@@ -444,26 +846,30 @@ class WeekGridGlanceWidget : GlanceAppWidget() {
           }
         } else {
           GlanceLazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-            glanceItems(snap.habits, itemId = { it.id.hashCode().toLong() }) { habit ->
+            glanceItems(snap.habits.take(10), itemId = { it.id.hashCode().toLong() }) { habit ->
               val hColor = parseHexColor(habit.colorKey)
               val hColorArgb = hColor.toArgb()
               val streak = snap.streaksByHabit[habit.id] ?: 0
               val hEntries = snap.entriesByHabit[habit.id].orEmpty()
               val hPauses = snap.pausesByHabit[habit.id].orEmpty()
+              val todayDone = ScheduleMatcher.isEntryDone(habit, hEntries[snap.today])
+              val iconBadgeBmp = WidgetBitmapRenderer.renderHabitIconBadgeBitmap(
+                iconKey = habit.iconKey,
+                habitColorInt = hColorArgb,
+                sizePx = 76
+              )
 
               GlanceRow(
                 verticalAlignment = GlanceAlignment.CenterVertically,
                 modifier = GlanceModifier
                   .fillMaxWidth()
-                  .padding(vertical = 5.dp)
+                  .padding(vertical = 4.dp)
               ) {
-                // Icon tile
+                // Rounded-square tinted icon badge
                 GlanceBox(
                   contentAlignment = GlanceAlignment.Center,
                   modifier = GlanceModifier
-                    .size(38.dp)
-                    .cornerRadius(12.dp)
-                    .background(hColor.copy(alpha = 0.22f))
+                    .size(32.dp)
                     .clickable(
                       actionStartActivity(
                         Intent(context, MainActivity::class.java).apply {
@@ -472,34 +878,58 @@ class WeekGridGlanceWidget : GlanceAppWidget() {
                       )
                     )
                 ) {
-                  GlanceText(
-                    text = habit.name.take(1).uppercase(),
-                    style = GlanceTextStyle(
-                      color = ColorProvider(hColor),
-                      fontSize = 15.sp,
-                      fontWeight = GlanceFontWeight.Bold
-                    )
+                  Image(
+                    provider = ImageProvider(iconBadgeBmp),
+                    contentDescription = habit.name,
+                    modifier = GlanceModifier.size(30.dp)
                   )
                 }
                 GlanceSpacer(modifier = GlanceModifier.width(8.dp))
-                GlanceText(
-                  text = habit.name,
-                  maxLines = 1,
-                  style = GlanceTextStyle(
-                    color = ColorProvider(Color.White),
-                    fontSize = 14.sp,
-                    fontWeight = GlanceFontWeight.Medium
-                  ),
-                  modifier = GlanceModifier.defaultWeight()
-                )
-                GlanceText(
-                  text = "🔥$streak",
-                  style = GlanceTextStyle(
-                    color = ColorProvider(Color(0xFF8E8F98)),
-                    fontSize = 11.sp
-                  ),
-                  modifier = GlanceModifier.padding(end = 6.dp)
-                )
+                if (!snap.hideNames) {
+                  GlanceText(
+                    text = habit.name,
+                    maxLines = 1,
+                    style = GlanceTextStyle(
+                      color = ColorProvider(Color.White),
+                      fontSize = 13.sp,
+                      fontWeight = GlanceFontWeight.Medium
+                    ),
+                    modifier = GlanceModifier
+                      .defaultWeight()
+                      .clickable(
+                        actionSendBroadcast(
+                          if (todayDone) {
+                            HabitRadarGlanceAppWidgetReceiver.createToggleHabitDoneIntent(
+                              context = context,
+                              receiverClass = WeekGridWidgetReceiver::class.java,
+                              habitId = habit.id,
+                              date = snap.today
+                            )
+                          } else {
+                            HabitRadarGlanceAppWidgetReceiver.createMarkHabitDoneIntent(
+                              context = context,
+                              receiverClass = WeekGridWidgetReceiver::class.java,
+                              habitId = habit.id,
+                              date = snap.today
+                            )
+                          }
+                        )
+                      )
+                  )
+                } else {
+                  GlanceSpacer(modifier = GlanceModifier.defaultWeight())
+                }
+                if (snap.showStreak) {
+                  GlanceText(
+                    text = "🔥 $streak",
+                    style = GlanceTextStyle(
+                      color = ColorProvider(Color(0xFF9A9AA2)),
+                      fontSize = 11.sp,
+                      fontWeight = GlanceFontWeight.Medium
+                    ),
+                    modifier = GlanceModifier.padding(end = 6.dp)
+                  )
+                }
 
                 val daysToShow = if (isCompactNarrow) listOf(snap.today) else snap.weekDays
                 daysToShow.forEach { d ->
@@ -507,22 +937,33 @@ class WeekGridGlanceWidget : GlanceAppWidget() {
                   val scheduled = ScheduleMatcher.isScheduledOn(habit, d, hPauses)
                   val done = ScheduleMatcher.isEntryDone(habit, entry)
                   val state = CircleStateMapper.mapState(scheduled, entry?.status, done, d, snap.today)
-                  val bmp = WidgetBitmapRenderer.renderCircleBitmap(state, hColorArgb, 60)
-                  val canClick = d == snap.today || (!d.isAfter(snap.today) && snap.allowBackfill && scheduled)
+                  val bmp = WidgetBitmapRenderer.renderCircleBitmap(state, hColorArgb, 56)
+                  val canClick = d == snap.today || (!d.isAfter(snap.today) && snap.allowBackfill)
 
                   GlanceBox(
                     contentAlignment = GlanceAlignment.Center,
                     modifier = GlanceModifier
-                      .size(32.dp)
+                      .size(24.dp)
                       .padding(2.dp)
                       .let { mod ->
                         if (canClick) {
                           mod.clickable(
-                            actionRunCallback<ToggleHabitWidgetAction>(
-                              actionParametersOf(
-                                WidgetParams.HabitIdKey to habit.id,
-                                WidgetParams.DateStrKey to d.toString()
-                              )
+                            actionSendBroadcast(
+                              if (done) {
+                                HabitRadarGlanceAppWidgetReceiver.createToggleHabitDoneIntent(
+                                  context = context,
+                                  receiverClass = WeekGridWidgetReceiver::class.java,
+                                  habitId = habit.id,
+                                  date = d
+                                )
+                              } else {
+                                HabitRadarGlanceAppWidgetReceiver.createMarkHabitDoneIntent(
+                                  context = context,
+                                  receiverClass = WeekGridWidgetReceiver::class.java,
+                                  habitId = habit.id,
+                                  date = d
+                                )
+                              }
                             )
                           )
                         } else mod
@@ -531,7 +972,7 @@ class WeekGridGlanceWidget : GlanceAppWidget() {
                     Image(
                       provider = ImageProvider(bmp),
                       contentDescription = "${habit.name}, $d, ${state.name.lowercase()}",
-                      modifier = GlanceModifier.size(28.dp)
+                      modifier = GlanceModifier.size(20.dp)
                     )
                   }
                 }
@@ -544,74 +985,140 @@ class WeekGridGlanceWidget : GlanceAppWidget() {
   }
 }
 
-// 2. TODAY CHECKLIST WIDGET
+// 2. HABIT WEEK WIDGET ("Habit Week — this week at a glance; tap today's circle to complete.")
 class TodayListGlanceWidget : GlanceAppWidget() {
   override suspend fun provideGlance(context: Context, id: GlanceId) {
-    val snap = loadWidgetSnapshot(context)
-    val scheduledToday = snap.habits.filter {
-      ScheduleMatcher.isScheduledOn(it, snap.today, snap.pausesByHabit[it.id].orEmpty())
-    }
-    val doneToday = scheduledToday.count { h ->
-      ScheduleMatcher.isEntryDone(h, snap.entriesByHabit[h.id]?.get(snap.today))
-    }
+    val snap = loadWidgetSnapshot(context, id)
+    val habit = snap.habits.firstOrNull { it.name.equals("Walk", ignoreCase = true) }
+      ?: snap.habits.firstOrNull()
 
     provideContent {
-      GlanceColumn(
-        modifier = GlanceModifier
-          .fillMaxSize()
-          .cornerRadius(28.dp)
-          .background(Color(0xFF17181D))
-          .padding(14.dp)
-      ) {
-        GlanceText(
-          text = "$doneToday of ${scheduledToday.size} done today",
-          style = GlanceTextStyle(
-            color = ColorProvider(Color.White),
-            fontSize = 14.sp,
-            fontWeight = GlanceFontWeight.Bold
-          ),
-          modifier = GlanceModifier.padding(bottom = 8.dp)
+      if (habit == null) {
+        GlanceBox(
+          contentAlignment = GlanceAlignment.Center,
+          modifier = GlanceModifier
+            .fillMaxSize()
+            .cornerRadius(24.dp)
+            .background(Color(0xFF141D16))
+            .padding(14.dp)
+            .clickable(actionStartActivity(Intent(context, MainActivity::class.java)))
+        ) {
+          GlanceText(
+            text = "Add a habit to preview Habit Week",
+            style = GlanceTextStyle(color = ColorProvider(Color.White), fontSize = 13.sp)
+          )
+        }
+      } else {
+        val hColor = parseHexColor(habit.colorKey)
+        val hColorArgb = hColor.toArgb()
+        val streak = snap.streaksByHabit[habit.id] ?: 0
+        val hEntries = snap.entriesByHabit[habit.id].orEmpty()
+        val iconBmp = WidgetBitmapRenderer.renderHabitIconBadgeBitmap(habit.iconKey, hColorArgb, 84)
+        val cardBg = Color(
+          red = (0x10 / 255f) * 0.88f + hColor.red * 0.12f,
+          green = (0x13 / 255f) * 0.88f + hColor.green * 0.12f,
+          blue = (0x11 / 255f) * 0.88f + hColor.blue * 0.12f,
+          alpha = 1f
         )
-        GlanceLazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-          glanceItems(scheduledToday, itemId = { it.id.hashCode().toLong() }) { habit ->
-            val hColor = parseHexColor(habit.colorKey)
-            val entry = snap.entriesByHabit[habit.id]?.get(snap.today)
-            val done = ScheduleMatcher.isEntryDone(habit, entry)
-            val bmp = WidgetBitmapRenderer.renderCircleBitmap(
-              if (done) WidgetCircleVisualState.DONE else WidgetCircleVisualState.TODAY_PENDING,
-              hColor.toArgb(),
-              64
+
+        GlanceColumn(
+          modifier = GlanceModifier
+            .fillMaxSize()
+            .cornerRadius(24.dp)
+            .background(cardBg)
+            .padding(14.dp)
+        ) {
+          // Top row: Icon Badge + Title & Streak
+          GlanceRow(
+            verticalAlignment = GlanceAlignment.CenterVertically,
+            modifier = GlanceModifier.fillMaxWidth().padding(bottom = 10.dp)
+          ) {
+            Image(
+              provider = ImageProvider(iconBmp),
+              contentDescription = habit.name,
+              modifier = GlanceModifier.size(38.dp)
             )
-            GlanceRow(
-              verticalAlignment = GlanceAlignment.CenterVertically,
-              modifier = GlanceModifier.fillMaxWidth().padding(vertical = 4.dp)
-            ) {
+            GlanceSpacer(modifier = GlanceModifier.width(10.dp))
+            GlanceColumn {
               GlanceText(
-                text = habit.name,
+                text = if (snap.hideNames) "Habit" else habit.name,
                 maxLines = 1,
                 style = GlanceTextStyle(
-                  color = ColorProvider(if (done) Color(0xFF8E8F98) else Color.White),
-                  fontSize = 14.sp
-                ),
-                modifier = GlanceModifier.defaultWeight()
+                  color = ColorProvider(Color.White),
+                  fontSize = 16.sp,
+                  fontWeight = GlanceFontWeight.Bold
+                )
               )
+              if (snap.showStreak) {
+                GlanceText(
+                  text = "🔥 $streak",
+                  style = GlanceTextStyle(
+                    color = ColorProvider(Color(0xFFA0A8A2)),
+                    fontSize = 12.sp,
+                    fontWeight = GlanceFontWeight.Medium
+                  )
+                )
+              }
+            }
+          }
+
+          // Bottom row: 7 day columns with today's column highlighted in a vertical rounded pill
+          GlanceRow(
+            verticalAlignment = GlanceAlignment.CenterVertically,
+            modifier = GlanceModifier.fillMaxWidth()
+          ) {
+            snap.weekDays.forEach { d ->
+              val isToday = d == snap.today
+              val done = ScheduleMatcher.isEntryDone(habit, hEntries[d])
+              val circleBmp = WidgetBitmapRenderer.renderWeekDayCircleBitmap(
+                isDone = done,
+                isToday = isToday,
+                habitColorInt = hColorArgb,
+                sizePx = 72
+              )
+              val clickAction = actionSendBroadcast(
+                if (done) {
+                  HabitRadarGlanceAppWidgetReceiver.createToggleHabitDoneIntent(
+                    context = context,
+                    receiverClass = TodayListWidgetReceiver::class.java,
+                    habitId = habit.id,
+                    date = d
+                  )
+                } else {
+                  HabitRadarGlanceAppWidgetReceiver.createMarkHabitDoneIntent(
+                    context = context,
+                    receiverClass = TodayListWidgetReceiver::class.java,
+                    habitId = habit.id,
+                    date = d
+                  )
+                }
+              )
+
               GlanceBox(
+                contentAlignment = GlanceAlignment.Center,
                 modifier = GlanceModifier
-                  .size(32.dp)
-                  .clickable(
-                    actionRunCallback<ToggleHabitWidgetAction>(
-                      actionParametersOf(
-                        WidgetParams.HabitIdKey to habit.id,
-                        WidgetParams.DateStrKey to snap.today.toString()
-                      )
+                  .defaultWeight()
+                  .cornerRadius(14.dp)
+                  .background(if (isToday) hColor.copy(alpha = 0.18f) else Color.Transparent)
+                  .padding(vertical = 6.dp)
+                  .clickable(clickAction)
+              ) {
+                GlanceColumn(horizontalAlignment = GlanceAlignment.CenterHorizontally) {
+                  GlanceText(
+                    text = ScheduleMatcher.dowShortLabel(d.dayOfWeek.value),
+                    style = GlanceTextStyle(
+                      color = ColorProvider(if (isToday) Color.White else Color(0xFF8B998E)),
+                      fontSize = 11.sp,
+                      fontWeight = if (isToday) GlanceFontWeight.Bold else GlanceFontWeight.Medium
                     )
                   )
-              ) {
-                Image(
-                  provider = ImageProvider(bmp),
-                  contentDescription = habit.name,
-                  modifier = GlanceModifier.size(30.dp)
-                )
+                  GlanceSpacer(modifier = GlanceModifier.height(6.dp))
+                  Image(
+                    provider = ImageProvider(circleBmp),
+                    contentDescription = "${habit.name} on $d",
+                    modifier = GlanceModifier.size(26.dp)
+                  )
+                }
               }
             }
           }
@@ -621,107 +1128,234 @@ class TodayListGlanceWidget : GlanceAppWidget() {
   }
 }
 
-// 3. PROGRESS RING WIDGET
+// 3. HABIT RINGS WIDGET ("Habit Rings — up to 8 habits as progress rings with 🔥 streak badges.")
 class ProgressRingGlanceWidget : GlanceAppWidget() {
+  override val sizeMode: SizeMode = SizeMode.Responsive(
+    setOf(DpSize(180.dp, 110.dp), DpSize(250.dp, 110.dp), DpSize(320.dp, 200.dp))
+  )
+
   override suspend fun provideGlance(context: Context, id: GlanceId) {
-    val snap = loadWidgetSnapshot(context)
-    val scheduled = snap.habits.filter {
-      ScheduleMatcher.isScheduledOn(it, snap.today, snap.pausesByHabit[it.id].orEmpty())
-    }
-    val done = scheduled.count { h ->
-      ScheduleMatcher.isEntryDone(h, snap.entriesByHabit[h.id]?.get(snap.today))
-    }
-    val pct = if (scheduled.isNotEmpty()) ((done.toDouble() / scheduled.size) * 100).roundToInt() else 0
-    val accent = parseHexColor(snap.accentColor).toArgb()
-    val ringBmp = WidgetBitmapRenderer.renderProgressRingBitmap(pct, accent, 160)
+    val snap = loadWidgetSnapshot(context, id)
+    val habitsToShow = snap.habits.take(8)
 
     provideContent {
+      val size = LocalSize.current
+      val maxRows = if (size.height >= 165.dp && habitsToShow.size > 4) 2 else 1
+      val rows = habitsToShow.chunked(4).take(maxRows)
+
       GlanceColumn(
         horizontalAlignment = GlanceAlignment.CenterHorizontally,
         verticalAlignment = GlanceAlignment.CenterVertically,
         modifier = GlanceModifier
           .fillMaxSize()
-          .cornerRadius(28.dp)
-          .background(Color(0xFF17181D))
-          .padding(12.dp)
-          .clickable(actionStartActivity(Intent(context, MainActivity::class.java)))
+          .cornerRadius(24.dp)
+          .background(Color(0xFF141416))
+          .padding(14.dp)
       ) {
-        Image(
-          provider = ImageProvider(ringBmp),
-          contentDescription = "Today completion $pct%",
-          modifier = GlanceModifier.size(76.dp)
-        )
-        GlanceSpacer(modifier = GlanceModifier.height(6.dp))
-        GlanceText(
-          text = "$done of ${scheduled.size} · 🔥 ${snap.dayRun}d run",
-          style = GlanceTextStyle(color = ColorProvider(Color(0xFF8E8F98)), fontSize = 11.sp)
-        )
+        if (habitsToShow.isEmpty()) {
+          GlanceText(
+            text = "Add habits to see Habit Rings",
+            style = GlanceTextStyle(color = ColorProvider(Color(0xFF8E8F98)), fontSize = 13.sp),
+            modifier = GlanceModifier.clickable(
+              actionStartActivity(Intent(context, MainActivity::class.java))
+            )
+          )
+        } else {
+          rows.forEachIndexed { rowIdx, rowHabits ->
+            if (rowIdx > 0) {
+              GlanceSpacer(modifier = GlanceModifier.height(10.dp))
+            }
+            GlanceRow(
+              verticalAlignment = GlanceAlignment.CenterVertically,
+              modifier = GlanceModifier.fillMaxWidth()
+            ) {
+              rowHabits.forEach { habit ->
+                val hColor = parseHexColor(habit.colorKey)
+                val streak = snap.streaksByHabit[habit.id] ?: 0
+                val hEntries = snap.entriesByHabit[habit.id].orEmpty()
+                val doneToday = ScheduleMatcher.isEntryDone(habit, hEntries[snap.today])
+                val doneDaysThisWeek = snap.weekDays.count { d ->
+                  ScheduleMatcher.isEntryDone(habit, hEntries[d])
+                }
+                val targetDays = habit.daysOfWeek.size.coerceAtLeast(1)
+                val progress = (doneDaysThisWeek.toFloat() / targetDays.toFloat()).coerceIn(0f, 1f)
+                val ringBmp = WidgetBitmapRenderer.renderHabitRingWithBadgeBitmap(
+                  iconKey = habit.iconKey,
+                  habitColorInt = hColor.toArgb(),
+                  progressFraction = progress,
+                  streak = streak,
+                  showStreak = snap.showStreak,
+                  sizePx = 152
+                )
+
+                GlanceBox(
+                  contentAlignment = GlanceAlignment.Center,
+                  modifier = GlanceModifier
+                    .defaultWeight()
+                    .clickable(
+                      actionSendBroadcast(
+                        if (doneToday) {
+                          HabitRadarGlanceAppWidgetReceiver.createToggleHabitDoneIntent(
+                            context = context,
+                            receiverClass = ProgressRingWidgetReceiver::class.java,
+                            habitId = habit.id,
+                            date = snap.today
+                          )
+                        } else {
+                          HabitRadarGlanceAppWidgetReceiver.createMarkHabitDoneIntent(
+                            context = context,
+                            receiverClass = ProgressRingWidgetReceiver::class.java,
+                            habitId = habit.id,
+                            date = snap.today
+                          )
+                        }
+                      )
+                    )
+                ) {
+                  Image(
+                    provider = ImageProvider(ringBmp),
+                    contentDescription = "${habit.name} ring",
+                    modifier = GlanceModifier.size(62.dp)
+                  )
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
 }
 
-// 4. SINGLE HABIT WIDGET
+// 4. SINGLE HABIT HEATMAP WIDGET ("Habit — consistency heatmap with a check button (small & medium).")
 class SingleHabitGlanceWidget : GlanceAppWidget() {
+  override val sizeMode: SizeMode = SizeMode.Responsive(
+    setOf(DpSize(140.dp, 110.dp), DpSize(250.dp, 130.dp), DpSize(320.dp, 160.dp))
+  )
+
   override suspend fun provideGlance(context: Context, id: GlanceId) {
-    val snap = loadWidgetSnapshot(context)
-    val habit = snap.habits.firstOrNull()
+    val snap = loadWidgetSnapshot(context, id)
+    val habit = snap.habits.firstOrNull { it.name.equals("Walk", ignoreCase = true) }
+      ?: snap.habits.firstOrNull()
+
     provideContent {
-      GlanceColumn(
-        horizontalAlignment = GlanceAlignment.CenterHorizontally,
-        verticalAlignment = GlanceAlignment.CenterVertically,
-        modifier = GlanceModifier
-          .fillMaxSize()
-          .cornerRadius(28.dp)
-          .background(Color(0xFF17181D))
-          .padding(12.dp)
-      ) {
-        if (habit == null) {
+      val size = LocalSize.current
+      val columns = if (size.width < 200.dp) 8 else 15
+
+      if (habit == null) {
+        GlanceBox(
+          contentAlignment = GlanceAlignment.Center,
+          modifier = GlanceModifier
+            .fillMaxSize()
+            .cornerRadius(24.dp)
+            .background(Color(0xFF141D16))
+            .padding(14.dp)
+            .clickable(actionStartActivity(Intent(context, MainActivity::class.java)))
+        ) {
           GlanceText(
             text = "Add a habit",
             style = GlanceTextStyle(color = ColorProvider(Color.White), fontSize = 13.sp)
           )
-        } else {
-          val hColor = parseHexColor(habit.colorKey)
-          val done = ScheduleMatcher.isEntryDone(habit, snap.entriesByHabit[habit.id]?.get(snap.today))
-          val streak = snap.streaksByHabit[habit.id] ?: 0
-          val bmp = WidgetBitmapRenderer.renderCircleBitmap(
-            if (done) WidgetCircleVisualState.DONE else WidgetCircleVisualState.TODAY_PENDING,
-            hColor.toArgb(),
-            84
-          )
-          GlanceText(
-            text = habit.name,
-            maxLines = 1,
-            style = GlanceTextStyle(
-              color = ColorProvider(Color.White),
-              fontSize = 15.sp,
-              fontWeight = GlanceFontWeight.Bold
+        }
+      } else {
+        val hColor = parseHexColor(habit.colorKey)
+        val hColorArgb = hColor.toArgb()
+        val hEntries = snap.entriesByHabit[habit.id].orEmpty()
+        val doneToday = ScheduleMatcher.isEntryDone(habit, hEntries[snap.today])
+        val streak = snap.streaksByHabit[habit.id] ?: 0
+        val iconBmp = WidgetBitmapRenderer.renderHabitIconBadgeBitmap(habit.iconKey, hColorArgb, 84)
+        val checkBtnBmp = WidgetBitmapRenderer.renderCheckButtonBitmap(doneToday, hColorArgb, 84)
+        val heatmapBmp = WidgetBitmapRenderer.renderHeatmapGridBitmap(
+          habit = habit,
+          entriesMap = hEntries,
+          today = snap.today,
+          weekDays = snap.weekDays,
+          habitColorInt = hColorArgb,
+          columns = columns,
+          widthPx = if (columns == 15) 660 else 360,
+          heightPx = 260
+        )
+        val cardBg = Color(
+          red = (0x10 / 255f) * 0.88f + hColor.red * 0.12f,
+          green = (0x13 / 255f) * 0.88f + hColor.green * 0.12f,
+          blue = (0x11 / 255f) * 0.88f + hColor.blue * 0.12f,
+          alpha = 1f
+        )
+        val toggleAction = actionSendBroadcast(
+          if (doneToday) {
+            HabitRadarGlanceAppWidgetReceiver.createToggleHabitDoneIntent(
+              context = context,
+              receiverClass = SingleHabitWidgetReceiver::class.java,
+              habitId = habit.id,
+              date = snap.today
             )
-          )
-          GlanceText(
-            text = "🔥 $streak Days",
-            style = GlanceTextStyle(color = ColorProvider(Color(0xFF8E8F98)), fontSize = 12.sp),
-            modifier = GlanceModifier.padding(bottom = 8.dp)
-          )
-          GlanceBox(
-            modifier = GlanceModifier
-              .size(48.dp)
-              .clickable(
-                actionRunCallback<ToggleHabitWidgetAction>(
-                  actionParametersOf(
-                    WidgetParams.HabitIdKey to habit.id,
-                    WidgetParams.DateStrKey to snap.today.toString()
-                  )
-                )
-              )
-          ) {
-            Image(
-              provider = ImageProvider(bmp),
-              contentDescription = "Toggle ${habit.name}",
-              modifier = GlanceModifier.size(48.dp)
+          } else {
+            HabitRadarGlanceAppWidgetReceiver.createMarkHabitDoneIntent(
+              context = context,
+              receiverClass = SingleHabitWidgetReceiver::class.java,
+              habitId = habit.id,
+              date = snap.today
             )
           }
+        )
+
+        GlanceColumn(
+          modifier = GlanceModifier
+            .fillMaxSize()
+            .cornerRadius(24.dp)
+            .background(cardBg)
+            .padding(14.dp)
+        ) {
+          // Top Header Row: Tinted Icon Badge + Title/Streak + Check Button
+          GlanceRow(
+            verticalAlignment = GlanceAlignment.CenterVertically,
+            modifier = GlanceModifier.fillMaxWidth().padding(bottom = 10.dp)
+          ) {
+            Image(
+              provider = ImageProvider(iconBmp),
+              contentDescription = habit.name,
+              modifier = GlanceModifier.size(36.dp)
+            )
+            GlanceSpacer(modifier = GlanceModifier.width(10.dp))
+            GlanceColumn(modifier = GlanceModifier.defaultWeight()) {
+              GlanceText(
+                text = if (snap.hideNames) "Habit" else habit.name,
+                maxLines = 1,
+                style = GlanceTextStyle(
+                  color = ColorProvider(Color.White),
+                  fontSize = 15.sp,
+                  fontWeight = GlanceFontWeight.Bold
+                )
+              )
+              if (snap.showStreak) {
+                GlanceText(
+                  text = "🔥 $streak",
+                  style = GlanceTextStyle(
+                    color = ColorProvider(Color(0xFFA0A8A2)),
+                    fontSize = 11.sp,
+                    fontWeight = GlanceFontWeight.Medium
+                  )
+                )
+              }
+            }
+            Image(
+              provider = ImageProvider(checkBtnBmp),
+              contentDescription = "Mark ${habit.name} done",
+              modifier = GlanceModifier
+                .size(34.dp)
+                .clickable(toggleAction)
+            )
+          }
+
+          // Consistency Heatmap Grid
+          Image(
+            provider = ImageProvider(heatmapBmp),
+            contentDescription = "${habit.name} consistency heatmap",
+            modifier = GlanceModifier
+              .fillMaxWidth()
+              .defaultWeight()
+              .clickable(toggleAction)
+          )
         }
       }
     }
@@ -731,7 +1365,7 @@ class SingleHabitGlanceWidget : GlanceAppWidget() {
 // 5. GOAL PROGRESS WIDGET
 class GoalProgressGlanceWidget : GlanceAppWidget() {
   override suspend fun provideGlance(context: Context, id: GlanceId) {
-    val snap = loadWidgetSnapshot(context)
+    val snap = loadWidgetSnapshot(context, id)
     val goal = snap.goals.firstOrNull()
     val steps = goal?.let { snap.stepsByGoal[it.id].orEmpty() }.orEmpty()
     val doneCount = steps.count { it.done }
@@ -741,8 +1375,8 @@ class GoalProgressGlanceWidget : GlanceAppWidget() {
       GlanceColumn(
         modifier = GlanceModifier
           .fillMaxSize()
-          .cornerRadius(28.dp)
-          .background(Color(0xFF17181D))
+          .cornerRadius(24.dp)
+          .background(Color(0xFF141416))
           .padding(14.dp)
       ) {
         if (goal == null) {
@@ -777,10 +1411,12 @@ class GoalProgressGlanceWidget : GlanceAppWidget() {
               modifier = GlanceModifier
                 .fillMaxWidth()
                 .clickable(
-                  actionRunCallback<ToggleStepWidgetAction>(
-                    actionParametersOf(
-                      WidgetParams.StepIdKey to nextStep.id,
-                      WidgetParams.GoalIdKey to goal.id
+                  actionSendBroadcast(
+                    HabitRadarGlanceAppWidgetReceiver.createMarkStepDoneIntent(
+                      context = context,
+                      receiverClass = GoalProgressWidgetReceiver::class.java,
+                      stepId = nextStep.id,
+                      goalId = goal.id
                     )
                   )
                 )
@@ -792,10 +1428,10 @@ class GoalProgressGlanceWidget : GlanceAppWidget() {
                 modifier = GlanceModifier.defaultWeight()
               )
               GlanceText(
-                text = "✓",
+                text = "✓ Mark done",
                 style = GlanceTextStyle(
                   color = ColorProvider(Color.White),
-                  fontSize = 14.sp,
+                  fontSize = 12.sp,
                   fontWeight = GlanceFontWeight.Bold
                 )
               )
@@ -812,23 +1448,167 @@ class GoalProgressGlanceWidget : GlanceAppWidget() {
   }
 }
 
-class WeekGridWidgetReceiver : GlanceAppWidgetReceiver() {
+/**
+ * Base [GlanceAppWidgetReceiver] that handles direct button interactions from home-screen widgets
+ * (such as marking a habit as 'done', toggling a habit entry, or completing a goal step),
+ * updating the local Room database immediately and refreshing all Glance widgets.
+ */
+abstract class HabitRadarGlanceAppWidgetReceiver : GlanceAppWidgetReceiver() {
+
+  override fun onReceive(context: Context, intent: Intent) {
+    when (intent.action) {
+      ACTION_MARK_HABIT_DONE,
+      ACTION_TOGGLE_HABIT_DONE,
+      ACTION_MARK_STEP_DONE -> {
+        val pendingResult = goAsync()
+        try {
+          // Immediately update the local Room database so completion state is persisted right away
+          runBlocking(Dispatchers.IO) {
+            handleWidgetActionIntent(context, intent)
+          }
+        } finally {
+          CoroutineScope(Dispatchers.IO).launch {
+            try {
+              WidgetUpdater.updateAll(context)
+            } finally {
+              pendingResult?.finish()
+            }
+          }
+        }
+      }
+      else -> super.onReceive(context, intent)
+    }
+  }
+
+  override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+    super.onDeleted(context, appWidgetIds)
+    val repo = context.appContainer.repository
+    runBlocking(Dispatchers.IO) {
+      appWidgetIds.forEach { appWidgetId ->
+        repo.deleteWidgetConfig(appWidgetId)
+      }
+    }
+  }
+
+  companion object {
+    const val ACTION_MARK_HABIT_DONE = "com.example.feature.widgets.glance.ACTION_MARK_HABIT_DONE"
+    const val ACTION_TOGGLE_HABIT_DONE = "com.example.feature.widgets.glance.ACTION_TOGGLE_HABIT_DONE"
+    const val ACTION_MARK_STEP_DONE = "com.example.feature.widgets.glance.ACTION_MARK_STEP_DONE"
+
+    const val EXTRA_HABIT_ID = "habit_id"
+    const val EXTRA_DATE_STR = "date_str"
+    const val EXTRA_STEP_ID = "step_id"
+    const val EXTRA_GOAL_ID = "goal_id"
+
+    suspend fun handleWidgetActionIntent(context: Context, intent: Intent): Boolean {
+      val repo = context.appContainer.repository
+      return when (intent.action) {
+        ACTION_MARK_HABIT_DONE -> {
+          val habitId = intent.getStringExtra(EXTRA_HABIT_ID)
+            ?: intent.data?.getQueryParameter(EXTRA_HABIT_ID)
+            ?: return false
+          val dateStr = intent.getStringExtra(EXTRA_DATE_STR)
+            ?: intent.data?.getQueryParameter(EXTRA_DATE_STR)
+          val date = dateStr?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            ?: repo.getLogicalToday()
+          repo.markHabitDoneOnDate(habitId, date)
+        }
+        ACTION_TOGGLE_HABIT_DONE -> {
+          val habitId = intent.getStringExtra(EXTRA_HABIT_ID)
+            ?: intent.data?.getQueryParameter(EXTRA_HABIT_ID)
+            ?: return false
+          val dateStr = intent.getStringExtra(EXTRA_DATE_STR)
+            ?: intent.data?.getQueryParameter(EXTRA_DATE_STR)
+          val date = dateStr?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            ?: repo.getLogicalToday()
+          repo.toggleHabitDoneOnDate(habitId, date)
+        }
+        ACTION_MARK_STEP_DONE -> {
+          val stepId = intent.getStringExtra(EXTRA_STEP_ID)
+            ?: intent.data?.getQueryParameter(EXTRA_STEP_ID)
+            ?: return false
+          val goalId = intent.getStringExtra(EXTRA_GOAL_ID)
+            ?: intent.data?.getQueryParameter(EXTRA_GOAL_ID)
+            ?: return false
+          repo.toggleStepDone(stepId, goalId)
+        }
+        else -> false
+      }
+    }
+
+    fun createMarkHabitDoneIntent(
+      context: Context,
+      receiverClass: Class<out HabitRadarGlanceAppWidgetReceiver> = TodayListWidgetReceiver::class.java,
+      habitId: String,
+      date: LocalDate? = null
+    ): Intent {
+      val dateToken = date?.toString() ?: "today"
+      return Intent(context, receiverClass).apply {
+        action = ACTION_MARK_HABIT_DONE
+        data = Uri.parse(
+          "habitradar://widget/mark_done?habit_id=${Uri.encode(habitId)}&date_str=${Uri.encode(dateToken)}"
+        )
+        putExtra(EXTRA_HABIT_ID, habitId)
+        if (date != null) {
+          putExtra(EXTRA_DATE_STR, date.toString())
+        }
+      }
+    }
+
+    fun createToggleHabitDoneIntent(
+      context: Context,
+      receiverClass: Class<out HabitRadarGlanceAppWidgetReceiver> = WeekGridWidgetReceiver::class.java,
+      habitId: String,
+      date: LocalDate? = null
+    ): Intent {
+      val dateToken = date?.toString() ?: "today"
+      return Intent(context, receiverClass).apply {
+        action = ACTION_TOGGLE_HABIT_DONE
+        data = Uri.parse(
+          "habitradar://widget/toggle_done?habit_id=${Uri.encode(habitId)}&date_str=${Uri.encode(dateToken)}"
+        )
+        putExtra(EXTRA_HABIT_ID, habitId)
+        if (date != null) {
+          putExtra(EXTRA_DATE_STR, date.toString())
+        }
+      }
+    }
+
+    fun createMarkStepDoneIntent(
+      context: Context,
+      receiverClass: Class<out HabitRadarGlanceAppWidgetReceiver> = GoalProgressWidgetReceiver::class.java,
+      stepId: String,
+      goalId: String
+    ): Intent {
+      return Intent(context, receiverClass).apply {
+        action = ACTION_MARK_STEP_DONE
+        data = Uri.parse(
+          "habitradar://widget/mark_step_done?step_id=${Uri.encode(stepId)}&goal_id=${Uri.encode(goalId)}"
+        )
+        putExtra(EXTRA_STEP_ID, stepId)
+        putExtra(EXTRA_GOAL_ID, goalId)
+      }
+    }
+  }
+}
+
+class WeekGridWidgetReceiver : HabitRadarGlanceAppWidgetReceiver() {
   override val glanceAppWidget: GlanceAppWidget = WeekGridGlanceWidget()
 }
 
-class TodayListWidgetReceiver : GlanceAppWidgetReceiver() {
+class TodayListWidgetReceiver : HabitRadarGlanceAppWidgetReceiver() {
   override val glanceAppWidget: GlanceAppWidget = TodayListGlanceWidget()
 }
 
-class ProgressRingWidgetReceiver : GlanceAppWidgetReceiver() {
+class ProgressRingWidgetReceiver : HabitRadarGlanceAppWidgetReceiver() {
   override val glanceAppWidget: GlanceAppWidget = ProgressRingGlanceWidget()
 }
 
-class SingleHabitWidgetReceiver : GlanceAppWidgetReceiver() {
+class SingleHabitWidgetReceiver : HabitRadarGlanceAppWidgetReceiver() {
   override val glanceAppWidget: GlanceAppWidget = SingleHabitGlanceWidget()
 }
 
-class GoalProgressWidgetReceiver : GlanceAppWidgetReceiver() {
+class GoalProgressWidgetReceiver : HabitRadarGlanceAppWidgetReceiver() {
   override val glanceAppWidget: GlanceAppWidget = GoalProgressGlanceWidget()
 }
 

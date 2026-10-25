@@ -253,7 +253,7 @@ fun FloatingPillTabBar(
       .padding(horizontal = 20.dp, vertical = 12.dp)
   ) {
     Surface(
-      color = Color(0xF217181D),
+      color = colors.card.copy(alpha = 0.95f),
       shape = RoundedCornerShape(32.dp),
       tonalElevation = 8.dp,
       shadowElevation = 12.dp,

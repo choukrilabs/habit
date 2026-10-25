@@ -76,9 +76,11 @@ import com.example.core.domain.model.GoalStatus
 import com.example.core.domain.model.Habit
 import com.example.core.domain.model.HabitPause
 import com.example.core.domain.model.HabitStepMetric
+import com.example.core.domain.model.MilestoneSummary
 import com.example.core.domain.model.Step
 import com.example.core.domain.model.StepType
 import com.example.core.domain.usecase.GoalStepEvaluator
+import com.example.core.domain.usecase.MilestoneEngine
 import com.example.core.domain.usecase.PaceStatus
 import com.example.core.ui.components.CardHairline
 import com.example.core.ui.components.HabitCheckCircle
@@ -106,7 +108,7 @@ import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-// 5.15 A. MILESTONES LIST SCREEN
+// 5.15 A. MILESTONES LIST SCREEN (BADGES GALLERY + GOALS & STEPS)
 @Composable
 fun MilestonesListScreen(
   goals: List<Goal>,
@@ -118,11 +120,23 @@ fun MilestonesListScreen(
   onBack: () -> Unit,
   onOpenNewGoal: (Goal?, List<Step>?) -> Unit,
   onOpenGoalDetail: (String) -> Unit,
-  onToggleManualStep: (Step) -> Unit
+  onToggleManualStep: (Step) -> Unit,
+  milestoneSummary: MilestoneSummary? = null,
+  initialShowBadgesTab: Boolean = true
 ) {
   val colors = LocalHabitRadarColors.current
+  var showBadgesMode by remember(initialShowBadgesTab) { mutableStateOf(initialShowBadgesTab) }
   var showDoneTab by remember { mutableStateOf(false) }
   val expandedGoals = remember { mutableStateListOf<String>() }
+
+  val resolvedMilestoneSummary = remember(milestoneSummary, habitsMap, entriesByHabit, pausesByHabit, today) {
+    milestoneSummary ?: MilestoneEngine.evaluateGlobalMilestones(
+      habits = habitsMap.values.toList(),
+      entries = entriesByHabit.values.flatten(),
+      pauses = pausesByHabit.values.flatten(),
+      today = today
+    )
+  }
 
   val summaries = remember(goals, stepsByGoal, habitsMap, entriesByHabit, pausesByHabit, today) {
     goals.map { g ->
@@ -151,20 +165,22 @@ fun MilestonesListScreen(
       .background(colors.bg)
   ) {
     SubPageTopBar(
-      title = "Milestones",
+      title = "Milestones & Badges",
       onBack = onBack
     ) {
-      Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-          .padding(end = 8.dp)
-          .size(42.dp)
-          .clip(CircleShape)
-          .background(colors.accent)
-          .clickable { onOpenNewGoal(null, null) }
-          .testTag("new_goal_button")
-      ) {
-        Icon(Icons.Default.Add, contentDescription = "New Goal", tint = colors.onAccent)
+      if (!showBadgesMode) {
+        Box(
+          contentAlignment = Alignment.Center,
+          modifier = Modifier
+            .padding(end = 8.dp)
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(colors.accent)
+            .clickable { onOpenNewGoal(null, null) }
+            .testTag("new_goal_button")
+        ) {
+          Icon(Icons.Default.Add, contentDescription = "New Goal", tint = colors.onAccent)
+        }
       }
     }
 
@@ -173,42 +189,64 @@ fun MilestonesListScreen(
       verticalArrangement = Arrangement.spacedBy(14.dp),
       modifier = Modifier.fillMaxSize()
     ) {
-      item {
-        SerifHeadlineText(rawText = "Big goals, *small steps.*", fontSizeSp = 34)
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-          text = "${activeSummaries.size} goals · $doneActiveSteps of $totalActiveSteps steps done",
-          fontSize = 14.sp,
-          color = colors.textSecondary
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Box(
-          modifier = Modifier
-            .fillMaxWidth()
-            .height(6.dp)
-            .clip(RoundedCornerShape(3.dp))
-            .background(colors.surface2)
-        ) {
-          Box(
-            modifier = Modifier
-              .fillMaxWidth(overallActiveRatio)
-              .fillMaxHeight()
-              .clip(RoundedCornerShape(3.dp))
-              .background(colors.accent)
-          )
-        }
-        Spacer(modifier = Modifier.height(14.dp))
+      item(key = "milestones_mode_switcher") {
         HabitRadarSegmentedControl(
-          options = listOf(false, true),
-          selected = showDoneTab,
-          labelMapper = { if (it) "Done (${doneSummaries.size})" else "Active (${activeSummaries.size})" },
-          onSelect = { showDoneTab = it },
-          height = 46.dp,
-          modifier = Modifier.fillMaxWidth()
+          options = listOf(true, false),
+          selected = showBadgesMode,
+          labelMapper = { isBadges ->
+            if (isBadges) {
+              "Badges (${resolvedMilestoneSummary.unlockedCount}/${resolvedMilestoneSummary.totalCount})"
+            } else {
+              "Goals (${activeSummaries.size})"
+            }
+          },
+          onSelect = { showBadgesMode = it },
+          height = 44.dp,
+          modifier = Modifier.fillMaxWidth().testTag("milestones_mode_segmented_control")
         )
       }
 
-      if (displayedList.isEmpty()) {
+      if (showBadgesMode) {
+        item(key = "badges_gallery_content") {
+          BadgesGallerySection(milestoneSummary = resolvedMilestoneSummary)
+        }
+      } else {
+        item {
+          SerifHeadlineText(rawText = "Big goals, *small steps.*", fontSizeSp = 34)
+          Spacer(modifier = Modifier.height(6.dp))
+          Text(
+            text = "${activeSummaries.size} goals · $doneActiveSteps of $totalActiveSteps steps done",
+            fontSize = 14.sp,
+            color = colors.textSecondary
+          )
+          Spacer(modifier = Modifier.height(8.dp))
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(6.dp)
+              .clip(RoundedCornerShape(3.dp))
+              .background(colors.surface2)
+          ) {
+            Box(
+              modifier = Modifier
+                .fillMaxWidth(overallActiveRatio)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(3.dp))
+                .background(colors.accent)
+            )
+          }
+          Spacer(modifier = Modifier.height(14.dp))
+          HabitRadarSegmentedControl(
+            options = listOf(false, true),
+            selected = showDoneTab,
+            labelMapper = { if (it) "Done (${doneSummaries.size})" else "Active (${activeSummaries.size})" },
+            onSelect = { showDoneTab = it },
+            height = 46.dp,
+            modifier = Modifier.fillMaxWidth()
+          )
+        }
+
+        if (displayedList.isEmpty()) {
         item {
           HabitRadarCard {
             Column(
@@ -430,6 +468,7 @@ fun MilestonesListScreen(
             }
           }
         }
+      }
       }
     }
   }

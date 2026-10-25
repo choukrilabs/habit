@@ -277,6 +277,16 @@ class HabitCloudSyncRepository(
     }
   }
 
+  suspend fun syncAllToCloud(habits: List<Habit>, entries: List<Entry>): Result<Int> {
+    val uid = runCatching { auth.currentUser?.uid }.getOrNull()
+      ?: return Result.failure(IllegalStateException("Sign in with Google to enable cloud backup."))
+    return runCatching {
+      habits.forEach { syncDomainHabitIfSignedIn(it) }
+      entries.forEach { syncDomainEntryIfSignedIn(it) }
+      habits.size
+    }
+  }
+
   companion object {
     fun sanitizeFirestoreId(raw: String): String {
       val cleaned = raw.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(128)

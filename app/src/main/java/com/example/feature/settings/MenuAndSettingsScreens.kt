@@ -36,9 +36,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,6 +50,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -98,6 +101,7 @@ import com.example.core.ui.theme.LocalHabitRadarColors
 import com.example.core.ui.theme.PlusJakartaSansFamily
 import com.example.core.ui.theme.habitTint
 import com.example.core.ui.theme.parseHexColor
+import com.example.feature.habit.ReminderEditorBottomSheet
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -118,9 +122,14 @@ fun MenuScreen(
   onNavigateMonthlyRecap: () -> Unit,
   onNavigateYearInReview: () -> Unit,
   onNavigateMilestones: () -> Unit,
-  onNavigateWidgets: () -> Unit
+  onNavigateWidgets: () -> Unit,
+  onNavigateDataVisualization: () -> Unit = {},
+  settings: AppSettings = AppSettings(),
+  onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit = {}
 ) {
   val colors = LocalHabitRadarColors.current
+  val isDarkActive = colors.isDark
+
   Column(
     modifier = Modifier
       .fillMaxSize()
@@ -133,6 +142,114 @@ fun MenuScreen(
         .verticalScroll(rememberScrollState())
         .padding(16.dp)
     ) {
+      SectionLabel("APPEARANCE")
+      HabitRadarCard(
+        contentPadding = PaddingValues(0.dp),
+        modifier = Modifier.testTag("menu_appearance_card")
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+          modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+              val nextMode = if (isDarkActive) ThemeMode.LIGHT else ThemeMode.DARK
+              onUpdateSettings { it.copy(theme = nextMode) }
+            }
+            .padding(horizontal = 18.dp, vertical = 14.dp)
+            .testTag("menu_theme_toggle_row")
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f).padding(end = 12.dp)
+          ) {
+            Box(
+              contentAlignment = Alignment.Center,
+              modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.accentContainer)
+            ) {
+              Icon(
+                imageVector = if (isDarkActive) Icons.Default.DarkMode else Icons.Default.LightMode,
+                contentDescription = if (isDarkActive) "Dark mode active" else "Light mode active",
+                tint = colors.accent,
+                modifier = Modifier.size(20.dp)
+              )
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Column {
+              Text(
+                text = if (isDarkActive) "Dark mode" else "Light mode",
+                fontFamily = PlusJakartaSansFamily,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textPrimary
+              )
+              Spacer(modifier = Modifier.height(2.dp))
+              Text(
+                text = if (isDarkActive) {
+                  "Restful obsidian contrast for calm focus"
+                } else {
+                  "Soft warm paper tones for daylight clarity"
+                },
+                fontFamily = PlusJakartaSansFamily,
+                fontSize = 12.sp,
+                color = colors.textSecondary
+              )
+            }
+          }
+          HabitRadarSwitch(
+            checked = isDarkActive,
+            onCheckedChange = { wantDark ->
+              val nextMode = if (wantDark) ThemeMode.DARK else ThemeMode.LIGHT
+              onUpdateSettings { it.copy(theme = nextMode) }
+            },
+            modifier = Modifier.testTag("menu_theme_switch")
+          )
+        }
+
+        CardHairline()
+
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .testTag("menu_theme_segmented_control")
+        ) {
+          listOf(
+            ThemeMode.LIGHT to "Light",
+            ThemeMode.DARK to "Dark",
+            ThemeMode.SYSTEM to "System"
+          ).forEach { (mode, label) ->
+            val isSelected = settings.theme == mode
+            Box(
+              contentAlignment = Alignment.Center,
+              modifier = Modifier
+                .weight(1f)
+                .height(38.dp)
+                .clip(RoundedCornerShape(19.dp))
+                .background(if (isSelected) colors.accent else colors.surface2)
+                .clickable {
+                  onUpdateSettings { it.copy(theme = mode) }
+                }
+                .testTag("menu_theme_option_${mode.name.lowercase()}")
+            ) {
+              Text(
+                text = label,
+                fontFamily = PlusJakartaSansFamily,
+                fontSize = 13.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) colors.onAccent else colors.textSecondary
+              )
+            }
+          }
+        }
+      }
+
+      Spacer(modifier = Modifier.height(16.dp))
       SectionLabel("GENERAL")
       HabitRadarCard(
         contentPadding = PaddingValues(0.dp),
@@ -189,6 +306,20 @@ fun MenuScreen(
           trailingText = "Add to home screen",
           onClick = onNavigateWidgets,
           modifier = Modifier.testTag("menu_row_widgets")
+        )
+      }
+
+      Spacer(modifier = Modifier.height(16.dp))
+      SectionLabel("ANALYTICS")
+      HabitRadarCard(
+        contentPadding = PaddingValues(0.dp),
+        modifier = Modifier.testTag("menu_analytics_card")
+      ) {
+        SettingsNavRow(
+          title = "Data Visualization",
+          trailingText = "Weekly & Monthly charts",
+          onClick = onNavigateDataVisualization,
+          modifier = Modifier.testTag("menu_row_data_visualization")
         )
       }
     }
@@ -270,6 +401,36 @@ fun SettingsScreen(
       SectionLabel("PREFERENCES")
 
       HabitRadarCard(contentPadding = PaddingValues(0.dp)) {
+        // 0. Appearance / Theme mode
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 14.dp)
+            .testTag("settings_theme_toggle_row")
+        ) {
+          Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text("Theme", fontSize = 17.sp, fontWeight = FontWeight.Medium, color = colors.textPrimary)
+            Text("Switch between light and dark modes", fontSize = 12.sp, color = colors.textSecondary)
+          }
+          HabitRadarSegmentedControl(
+            options = listOf(ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.SYSTEM),
+            selected = settings.theme,
+            labelMapper = {
+              when (it) {
+                ThemeMode.LIGHT -> "Light"
+                ThemeMode.DARK -> "Dark"
+                ThemeMode.SYSTEM -> "System"
+              }
+            },
+            onSelect = { t -> onUpdateSettings { it.copy(theme = t) } },
+            height = 40.dp,
+            modifier = Modifier.width(196.dp)
+          )
+        }
+        CardHairline()
+
         // 1. Week start on
         Column(modifier = Modifier.padding(18.dp)) {
           Row(
@@ -391,14 +552,20 @@ fun SettingsScreen(
         )
       }
 
+      val context = LocalContext.current
+      val scope = androidx.compose.runtime.rememberCoroutineScope()
+      val authService = remember(context) { context.appContainer.authService }
+      val currentUser by authService.authStateFlow().collectAsState(initial = authService.currentUser)
+
       Spacer(modifier = Modifier.height(22.dp))
       SectionLabel("DATA")
 
       HabitRadarCard(contentPadding = PaddingValues(0.dp)) {
         SettingsNavRow(
           title = "Backup & restore",
-          trailingText = "Last backup: $lastBackupText",
-          onClick = onOpenBackupRestore
+          trailingText = if (currentUser != null) "Last backup: $lastBackupText" else "Sign in required",
+          onClick = onOpenBackupRestore,
+          modifier = Modifier.testTag("settings_row_backup_restore")
         )
         CardHairline()
         SettingsNavRow(
@@ -413,30 +580,47 @@ fun SettingsScreen(
         )
       }
 
-      val context = LocalContext.current
-      val scope = androidx.compose.runtime.rememberCoroutineScope()
-      val authService = remember(context) { context.appContainer.authService }
-      val currentUser = remember(authService) { authService.currentUser }
-      if (currentUser != null) {
-        Spacer(modifier = Modifier.height(22.dp))
-        SectionLabel("CLOUD ACCOUNT")
-        HabitRadarCard(contentPadding = PaddingValues(0.dp)) {
+      Spacer(modifier = Modifier.height(22.dp))
+      SectionLabel("CLOUD ACCOUNT")
+      HabitRadarCard(contentPadding = PaddingValues(0.dp)) {
+        val user = currentUser
+        if (user != null) {
           SettingsNavRow(
-            title = currentUser.displayName ?: currentUser.email ?: "Signed in with Google",
-            subtitle = currentUser.email ?: "Cloud sync active",
+            title = user.displayName ?: user.email ?: "Signed in with Google",
+            subtitle = user.email ?: "Cloud sync active",
             trailingText = "Sign out",
             onClick = {
               scope.launch {
                 authService.signOut(context)
               }
-            }
+            },
+            modifier = Modifier.testTag("settings_row_sign_out")
+          )
+        } else {
+          SettingsNavRow(
+            title = "Not signed in (Offline mode)",
+            subtitle = "Backup & cloud sync stay disabled until you sign in",
+            trailingText = "Sign in",
+            onClick = {
+              scope.launch {
+                val res = authService.signInWithGoogle(context)
+                if (res.getOrNull() == null && res.isFailure) {
+                  authService.requireSignInPrompt()
+                }
+              }
+            },
+            modifier = Modifier.testTag("settings_row_sign_in")
           )
         }
       }
 
       Spacer(modifier = Modifier.height(18.dp))
       Text(
-        text = "Habit Radar syncs your habits and check-ins securely to your personal cloud account.",
+        text = if (currentUser != null) {
+          "Habit Radar syncs your habits and check-ins securely to your personal cloud account."
+        } else {
+          "Offline mode active. Sign in with Google anytime to unlock Cloud Backup & Restore."
+        },
         fontFamily = PlusJakartaSansFamily,
         fontSize = 13.sp,
         color = colors.textSecondary,
@@ -521,13 +705,14 @@ private fun SettingsToggleRow(
   title: String,
   subtitle: String? = null,
   checked: Boolean,
-  onCheckedChange: (Boolean) -> Unit
+  onCheckedChange: (Boolean) -> Unit,
+  modifier: Modifier = Modifier
 ) {
   val colors = LocalHabitRadarColors.current
   Row(
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.SpaceBetween,
-    modifier = Modifier
+    modifier = modifier
       .fillMaxWidth()
       .padding(horizontal = 18.dp, vertical = 12.dp)
   ) {
@@ -837,6 +1022,22 @@ fun HomeStudioScreen(
           checked = settings.groupSections,
           onCheckedChange = { v -> onUpdateSettings { it.copy(groupSections = v) } }
         )
+        CardHairline()
+        SettingsToggleRow(
+          title = "Show weekly habit performance",
+          subtitle = "Weekly completion summary card at the top of Today",
+          checked = settings.showWeeklyPerformanceCard,
+          onCheckedChange = { v -> onUpdateSettings { it.copy(showWeeklyPerformanceCard = v) } },
+          modifier = Modifier.testTag("home_studio_toggle_weekly_performance")
+        )
+        CardHairline()
+        SettingsToggleRow(
+          title = "Show milestone badges",
+          subtitle = "Earned achievements & next milestone shelf on Today",
+          checked = settings.showMilestoneBadgesShelf,
+          onCheckedChange = { v -> onUpdateSettings { it.copy(showMilestoneBadgesShelf = v) } },
+          modifier = Modifier.testTag("home_studio_toggle_milestone_badges")
+        )
       }
 
       Spacer(modifier = Modifier.height(12.dp))
@@ -950,6 +1151,60 @@ private fun HomeStudioPhoneMockPreview(settings: AppSettings) {
 
       Spacer(modifier = Modifier.height(8.dp))
 
+      if (settings.showWeeklyPerformanceCard) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(colors.card)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
+          Column {
+            Text("THIS WEEK", fontSize = 6.sp, color = colors.textSecondary, letterSpacing = 0.8.sp)
+            Text("78% complete", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = colors.accent)
+          }
+          Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.Bottom) {
+            listOf(8, 12, 10, 14, 11, 14, 9).forEach { h ->
+              Box(
+                modifier = Modifier
+                  .width(3.dp)
+                  .height(h.dp)
+                  .clip(RoundedCornerShape(1.5.dp))
+                  .background(colors.accent)
+              )
+            }
+          }
+        }
+        Spacer(modifier = Modifier.height(5.dp))
+      }
+
+      if (settings.showMilestoneBadgesShelf) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(colors.card)
+            .padding(horizontal = 8.dp, vertical = 5.dp)
+        ) {
+          Text("MILESTONE BADGES", fontSize = 6.sp, color = colors.textSecondary, letterSpacing = 0.8.sp)
+          Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            listOf("#F5A623", "#A8DFB4", "#8FBDF0").forEach { hex ->
+              Box(
+                modifier = Modifier
+                  .size(10.dp)
+                  .clip(CircleShape)
+                  .background(parseHexColor(hex))
+              )
+            }
+          }
+        }
+        Spacer(modifier = Modifier.height(5.dp))
+      }
+
       val visibleDemo = if (settings.hideCompleted) demoHabits.filter { !it.third } else demoHabits
       Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         visibleDemo.forEach { (title, hex, done) ->
@@ -1023,6 +1278,7 @@ private fun HomeStudioPhoneMockPreview(settings: AppSettings) {
 }
 
 // 5.8 NOTIFICATIONS SCREEN
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NotificationsScreen(
   habits: List<Habit>,
@@ -1033,7 +1289,9 @@ fun NotificationsScreen(
   onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
   onToggleHabitReminders: (String, Boolean) -> Unit,
   onOpenHabitDetailReminders: (String) -> Unit,
-  onOpenGoalDetail: (String) -> Unit
+  onOpenGoalDetail: (String) -> Unit,
+  onSaveHabitReminder: (Reminder) -> Unit = {},
+  onDeleteHabitReminder: (String) -> Unit = {}
 ) {
   val colors = LocalHabitRadarColors.current
   val context = LocalContext.current
@@ -1061,6 +1319,9 @@ fun NotificationsScreen(
   val goalsWithoutReminders = remember(activeGoals) {
     activeGoals.filter { !it.remindWeekly && !it.remindStepDue && it.remindBeforeDays == null }
   }
+
+  var editingHabitForReminder by remember { mutableStateOf<Habit?>(null) }
+  var editingReminder by remember { mutableStateOf<Reminder?>(null) }
 
   Column(
     modifier = Modifier
@@ -1145,6 +1406,34 @@ fun NotificationsScreen(
               checked = settings.morningNudgeEnabled,
               onCheckedChange = { v -> onUpdateSettings { it.copy(morningNudgeEnabled = v) } }
             )
+            if (settings.morningNudgeEnabled) {
+              Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(start = 18.dp, end = 18.dp, bottom = 10.dp)
+              ) {
+                listOf(LocalTime.of(7, 0), LocalTime.of(8, 0), LocalTime.of(9, 0)).forEach { preset ->
+                  val sel = settings.morningNudgeTime == preset
+                  val label = String.format("%02d:%02d", preset.hour, preset.minute)
+                  Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(12.dp))
+                      .background(if (sel) colors.accent else colors.surface2)
+                      .clickable { onUpdateSettings { it.copy(morningNudgeTime = preset) } }
+                      .padding(horizontal = 12.dp, vertical = 6.dp)
+                  ) {
+                    Text(
+                      text = label,
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = if (sel) colors.onAccent else colors.textPrimary
+                    )
+                  }
+                }
+              }
+            }
             CardHairline()
             SettingsToggleRow(
               title = "Evening save (${String.format("%02d:%02d", settings.eveningNudgeTime.hour, settings.eveningNudgeTime.minute)})",
@@ -1152,48 +1441,139 @@ fun NotificationsScreen(
               checked = settings.eveningNudgeEnabled,
               onCheckedChange = { v -> onUpdateSettings { it.copy(eveningNudgeEnabled = v) } }
             )
+            if (settings.eveningNudgeEnabled) {
+              Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(start = 18.dp, end = 18.dp, bottom = 12.dp)
+              ) {
+                listOf(LocalTime.of(20, 0), LocalTime.of(21, 0), LocalTime.of(22, 0)).forEach { preset ->
+                  val sel = settings.eveningNudgeTime == preset
+                  val label = String.format("%02d:%02d", preset.hour, preset.minute)
+                  Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(12.dp))
+                      .background(if (sel) colors.accent else colors.surface2)
+                      .clickable { onUpdateSettings { it.copy(eveningNudgeTime = preset) } }
+                      .padding(horizontal = 12.dp, vertical = 6.dp)
+                  ) {
+                    Text(
+                      text = label,
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = if (sel) colors.onAccent else colors.textPrimary
+                    )
+                  }
+                }
+              }
+            }
           }
         }
       }
 
-      // 3. HABIT REMINDERS card
+      // 3. HABIT REMINDERS card (WorkManager Daily Reminder Scheduler)
       item {
-        SectionLabel("HABIT REMINDERS")
+        SectionLabel("HABIT REMINDERS (DAILY WORKMANAGER SCHEDULE)")
         HabitRadarCard {
           if (habitsWithReminders.isEmpty()) {
-            Text("No active habit reminders yet.", fontSize = 14.sp, color = colors.textSecondary)
+            Text(
+              "No active habit reminders yet. Tap Set daily time below to schedule a daily WorkManager reminder.",
+              fontSize = 14.sp,
+              color = colors.textSecondary
+            )
           } else {
             habitsWithReminders.forEach { h ->
-              val hRems = remindersByHabit[h.id].orEmpty()
+              val hRems = remindersByHabit[h.id].orEmpty().sortedBy { it.time }
               val anyEnabled = hRems.any { it.enabled }
-              val chipsStr = hRems.joinToString(" · ") { String.format("%02d:%02d", it.time.hour, it.time.minute) }
               val tint = habitTint(h.colorKey, colors.isDark)
 
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
+              Column(
                 modifier = Modifier
                   .fillMaxWidth()
-                  .clickable { onOpenHabitDetailReminders(h.id) }
                   .padding(vertical = 8.dp)
               ) {
-                Box(
-                  contentAlignment = Alignment.Center,
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
                   modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(tint.iconTileBackground)
+                    .fillMaxWidth()
+                    .clickable { onOpenHabitDetailReminders(h.id) }
                 ) {
-                  HabitIconView(iconKey = h.iconKey, tint = tint.baseColor, modifier = Modifier.size(20.dp))
+                  Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                      .size(40.dp)
+                      .clip(RoundedCornerShape(12.dp))
+                      .background(tint.iconTileBackground)
+                  ) {
+                    HabitIconView(iconKey = h.iconKey, tint = tint.baseColor, modifier = Modifier.size(20.dp))
+                  }
+                  Spacer(modifier = Modifier.width(12.dp))
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(h.name, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = colors.textPrimary)
+                    Text(
+                      text = "${hRems.size} daily reminder${if (hRems.size == 1) "" else "s"} scheduled",
+                      fontSize = 12.sp,
+                      color = colors.textSecondary
+                    )
+                  }
+                  HabitRadarSwitch(
+                    checked = anyEnabled,
+                    onCheckedChange = { onToggleHabitReminders(h.id, it) }
+                  )
                 }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                  Text(h.name, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = colors.textPrimary)
-                  Text(chipsStr, fontSize = 12.sp, color = colors.accent)
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                FlowRow(
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                  verticalArrangement = Arrangement.spacedBy(6.dp),
+                  modifier = Modifier.fillMaxWidth().padding(start = 52.dp)
+                ) {
+                  hRems.forEach { rem ->
+                    val timeLabel = String.format("%02d:%02d", rem.time.hour, rem.time.minute)
+                    Box(
+                      modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (rem.enabled) colors.accentContainer else colors.surface2)
+                        .clickable {
+                          editingHabitForReminder = h
+                          editingReminder = rem
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .testTag("habit_reminder_time_chip_${h.id}_$timeLabel")
+                    ) {
+                      Text(
+                        text = timeLabel,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (rem.enabled) colors.accent else colors.textSecondary
+                      )
+                    }
+                  }
+
+                  if (hRems.size < 5) {
+                    Box(
+                      modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colors.surface2)
+                        .clickable {
+                          editingHabitForReminder = h
+                          editingReminder = null
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .testTag("add_daily_reminder_time_${h.id}")
+                    ) {
+                      Text(
+                        text = "+ Add time",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.accent
+                      )
+                    }
+                  }
                 }
-                HabitRadarSwitch(
-                  checked = anyEnabled,
-                  onCheckedChange = { onToggleHabitReminders(h.id, it) }
-                )
               }
             }
           }
@@ -1213,10 +1593,14 @@ fun NotificationsScreen(
                   modifier = Modifier
                     .clip(RoundedCornerShape(14.dp))
                     .background(colors.surface2)
-                    .clickable { onOpenHabitDetailReminders(h.id) }
+                    .clickable {
+                      editingHabitForReminder = h
+                      editingReminder = null
+                    }
                     .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag("set_daily_reminder_${h.id}")
                 ) {
-                  Text("Add", fontSize = 12.sp, color = colors.accent, fontWeight = FontWeight.SemiBold)
+                  Text("Set daily time", fontSize = 12.sp, color = colors.accent, fontWeight = FontWeight.SemiBold)
                 }
               }
             }
@@ -1388,6 +1772,32 @@ fun NotificationsScreen(
         Spacer(modifier = Modifier.height(24.dp))
       }
     }
+  }
+
+  val targetHabit = editingHabitForReminder
+  if (targetHabit != null) {
+    ReminderEditorBottomSheet(
+      initialReminder = editingReminder,
+      habitId = targetHabit.id,
+      habitName = targetHabit.name,
+      defaultDays = targetHabit.daysOfWeek.ifEmpty { listOf(1, 2, 3, 4, 5, 6, 7) },
+      onDismiss = {
+        editingHabitForReminder = null
+        editingReminder = null
+      },
+      onSave = { savedReminder ->
+        onSaveHabitReminder(savedReminder)
+        editingHabitForReminder = null
+        editingReminder = null
+      },
+      onDelete = if (editingReminder != null) {
+        { toDelete ->
+          onDeleteHabitReminder(toDelete.id)
+          editingHabitForReminder = null
+          editingReminder = null
+        }
+      } else null
+    )
   }
 }
 

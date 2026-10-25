@@ -48,6 +48,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -65,11 +66,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.core.data.datastore.SettingsDataStore
 import com.example.core.data.db.HabitRadarDatabase
+import com.example.core.data.db.toDomain
+import com.example.core.di.appContainer
 import com.example.core.domain.model.AppSettings
 import com.example.core.domain.model.Entry
 import com.example.core.domain.model.Goal
@@ -101,11 +105,23 @@ import com.example.feature.widgets.glance.TodayListWidgetReceiver
 import com.example.feature.widgets.glance.WeekGridWidgetReceiver
 import com.example.feature.widgets.glance.WidgetUpdater
 import java.io.File
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
+
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.graphics.lerp
+import com.example.core.domain.model.EntryStatus
+import com.example.core.domain.model.HabitPause
+import com.example.core.domain.model.RepeatType
+import com.example.core.domain.model.TrackType
+import com.example.core.domain.usecase.LogicalDateCalculator
+import com.example.core.domain.usecase.StreakCalculator
+import com.example.core.ui.components.HabitIconView
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -117,36 +133,247 @@ fun WidgetsStudioScreen(
   settings: AppSettings,
   today: LocalDate,
   onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
-  onBack: () -> Unit
+  onBack: () -> Unit,
+  onToggleHabitOnDate: (Habit, LocalDate) -> Unit = { _, _ -> },
+  onToggleGoalStep: (Step) -> Unit = {}
 ) {
   val colors = LocalHabitRadarColors.current
   val accent = resolveAppAccent(settings.accentColor)
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
 
-  val pagerState = rememberPagerState(pageCount = { 5 })
+  var selectedWidgetToPin by remember { mutableIntStateOf(0) }
   var showManualFallbackSheet by remember { mutableStateOf(false) }
+  var showLargeHabitListPreview by remember { mutableStateOf(false) }
   var refreshFeedback by remember { mutableStateOf<String?>(null) }
 
-  val widgetTitles = listOf(
-    "Week Grid (4×4)",
-    "Today Checklist (4×3)",
-    "Progress Ring (2×2)",
-    "Single Habit (2×2)",
-    "Goal Progress (4×2)"
-  )
-  val widgetDescriptions = listOf(
-    "Up to 4 habits with a 7-day interactive grid",
-    "Today's scheduled checklist with streak badges",
-    "Compact circular progress ring for today",
-    "One habit's icon, streak, and 7-day mini strip",
-    "One Milestone goal's progress bar & next step"
-  )
+  // Local interactive state for showcase fallback habits when DB doesn't have them yet
+  val demoToggledKeys = remember { mutableStateListOf<String>() }
+
+  val entriesByHabit = remember(entries) {
+    entries.groupBy { it.habitId }.mapValues { (_, list) -> list.associateBy { it.date } }
+  }
+  val entriesListByHabit = remember(entries) {
+    entries.groupBy { it.habitId }
+  }
+
+  val realHabitIds = remember(habits) { habits.map { it.id }.toSet() }
+
+  // Build showcase fallback habits matching Screenshot 1 & Screenshot 2
+  val showcaseHabits = remember(today) {
+    listOf(
+      Habit(
+        id = "demo_walk",
+        name = "Walk",
+        iconKey = "walk",
+        colorKey = "#6BBF79",
+        repeatType = RepeatType.DAILY,
+        daysOfWeek = listOf(1, 4, 7),
+        trackType = TrackType.TASK,
+        startDate = today.minusDays(90),
+        sortOrder = 0
+      ),
+      Habit(
+        id = "demo_lights_out",
+        name = "Lights out by 12",
+        iconKey = "moon",
+        colorKey = "#A98DF0",
+        repeatType = RepeatType.DAILY,
+        daysOfWeek = listOf(1, 2, 3, 4, 5, 6, 7),
+        trackType = TrackType.TASK,
+        startDate = today.minusDays(90),
+        sortOrder = 1
+      ),
+      Habit(
+        id = "demo_log_spent",
+        name = "Log what I spent",
+        iconKey = "savings",
+        colorKey = "#EBA85E",
+        repeatType = RepeatType.DAILY,
+        daysOfWeek = listOf(1, 2, 3, 4, 5, 6, 7),
+        trackType = TrackType.TASK,
+        startDate = today.minusDays(90),
+        sortOrder = 2
+      ),
+      Habit(
+        id = "demo_fajr",
+        name = "Fajr on time",
+        iconKey = "sunrise",
+        colorKey = "#6BC5B8",
+        repeatType = RepeatType.DAILY,
+        daysOfWeek = listOf(1, 2, 3, 4, 5, 6, 7),
+        trackType = TrackType.TASK,
+        startDate = today.minusDays(90),
+        sortOrder = 3
+      ),
+      Habit(
+        id = "demo_quran",
+        name = "Read Quran",
+        iconKey = "book",
+        colorKey = "#7FD18E",
+        repeatType = RepeatType.DAILY,
+        daysOfWeek = listOf(1, 2, 3, 4, 5, 6, 7),
+        trackType = TrackType.TASK,
+        startDate = today.minusDays(90),
+        sortOrder = 4
+      ),
+      Habit(
+        id = "demo_morning_adhkar",
+        name = "Morning adhkar",
+        iconKey = "sun",
+        colorKey = "#E8C56B",
+        repeatType = RepeatType.DAILY,
+        daysOfWeek = listOf(1, 2, 3, 4, 5, 6, 7),
+        trackType = TrackType.TASK,
+        startDate = today.minusDays(90),
+        sortOrder = 5
+      ),
+      Habit(
+        id = "demo_evening_adhkar",
+        name = "Evening adhkar",
+        iconKey = "night",
+        colorKey = "#A98DF0",
+        repeatType = RepeatType.DAILY,
+        daysOfWeek = listOf(1, 2, 3, 4, 5, 6, 7),
+        trackType = TrackType.TASK,
+        startDate = today.minusDays(90),
+        sortOrder = 6
+      ),
+      Habit(
+        id = "demo_sadaqah",
+        name = "Give sadaqah weekly",
+        iconKey = "charity",
+        colorKey = "#E899B8",
+        repeatType = RepeatType.WEEKLY,
+        timesPerPeriod = 1,
+        trackType = TrackType.TASK,
+        startDate = today.minusDays(90),
+        sortOrder = 7
+      ),
+      Habit(
+        id = "demo_workout",
+        name = "Workout",
+        iconKey = "workout",
+        colorKey = "#6BBF79",
+        repeatType = RepeatType.DAILY,
+        daysOfWeek = listOf(1, 2, 3, 4, 5, 6, 7),
+        trackType = TrackType.TASK,
+        startDate = today.minusDays(90),
+        sortOrder = 8
+      ),
+      Habit(
+        id = "demo_stretch",
+        name = "Morning Stretch",
+        iconKey = "emoji:🙏",
+        colorKey = "#7FD18E",
+        repeatType = RepeatType.DAILY,
+        daysOfWeek = listOf(1, 2, 3, 4, 5, 6, 7),
+        trackType = TrackType.TASK,
+        startDate = today.minusDays(90),
+        sortOrder = 9
+      )
+    )
+  }
+
+  // Compute Monday..Sunday week dates ending at the current week's Sunday
+  val weekDays = remember(today, settings.weekStart) {
+    val start = LogicalDateCalculator.startOfWeek(today, WeekStartDay.MONDAY)
+    (0..6).map { start.plusDays(it.toLong()) }
+  }
+  val saturdayDate = remember(weekDays) { weekDays.getOrElse(5) { today.minusDays(1) } }
+
+  // Combine user's real habits with showcase habits when needed so all 4 widget cards look complete
+  val displayHabitsForShowcase = remember(habits, showcaseHabits) {
+    if (habits.size >= 4) {
+      habits
+    } else {
+      val existingNames = habits.map { it.name.lowercase() }.toSet()
+      habits + showcaseHabits.filter { it.name.lowercase() !in existingNames }
+    }
+  }
+
+  val primarySingleHabit = remember(habits, showcaseHabits) {
+    habits.firstOrNull { it.name.equals("Walk", ignoreCase = true) }
+      ?: habits.firstOrNull()
+      ?: showcaseHabits.first()
+  }
+
+  fun isHabitDoneOn(habit: Habit, date: LocalDate): Boolean {
+    val toggleKey = "${habit.id}_$date"
+    val baseDone = if (habit.id in realHabitIds) {
+      ScheduleMatcher.isEntryDone(habit, entriesByHabit[habit.id]?.get(date))
+    } else {
+      // In Screenshot 1 & 2, Saturday (index 5) is completed for habits 1..7 (Lights out, Log spent, Fajr, Quran, Adhkar, Sadaqah)
+      date == saturdayDate && habit.id in setOf(
+        "demo_lights_out",
+        "demo_log_spent",
+        "demo_fajr",
+        "demo_quran",
+        "demo_morning_adhkar",
+        "demo_evening_adhkar",
+        "demo_sadaqah"
+      )
+    }
+    return if (toggleKey in demoToggledKeys) !baseDone else baseDone
+  }
+
+  fun getHabitStreak(habit: Habit): Int {
+    if (habit.id in realHabitIds) {
+      val s = StreakCalculator.calculateStreaks(
+        habit = habit,
+        entries = entriesListByHabit[habit.id].orEmpty(),
+        pauses = emptyList(),
+        today = today
+      )
+      return s.currentStreak
+    }
+    val baseStreak = if (habit.id in setOf(
+        "demo_lights_out",
+        "demo_log_spent",
+        "demo_fajr",
+        "demo_quran",
+        "demo_morning_adhkar",
+        "demo_evening_adhkar",
+        "demo_sadaqah"
+      )
+    ) 1 else 0
+    val todayToggled = "${habit.id}_$today" in demoToggledKeys
+    return if (todayToggled) baseStreak + 1 else baseStreak
+  }
+
+  val handleToggleHabit: (Habit, LocalDate) -> Unit = { habit, date ->
+    if (habit.id in realHabitIds) {
+      onToggleHabitOnDate(habit, date)
+      scope.launch {
+        context.appContainer.repository.toggleHabitDoneOnDate(habit.id, date)
+        WidgetUpdater.updateAll(context)
+      }
+    } else {
+      val key = "${habit.id}_$date"
+      if (key in demoToggledKeys) demoToggledKeys.remove(key) else demoToggledKeys.add(key)
+    }
+  }
+
+  val handlePinWidget: (Class<*>) -> Unit = { receiverClass ->
+    val mgr = AppWidgetManager.getInstance(context)
+    val provider = ComponentName(context, receiverClass)
+    if (mgr.isRequestPinAppWidgetSupported) {
+      val pinned = mgr.requestPinAppWidget(provider, null, null)
+      if (!pinned) showManualFallbackSheet = true
+    } else {
+      showManualFallbackSheet = true
+    }
+  }
+
+  val radiusDp = when (settings.defaultWidgetCorner) {
+    WidgetCornerStyle.ROUNDED -> 24.dp
+    WidgetCornerStyle.EXTRA -> 30.dp
+  }
 
   Scaffold(
-    containerColor = colors.background,
+    containerColor = Color(0xFF000000),
     topBar = {
-      SubPageTopBar(title = "Widgets", onBack = onBack)
+      SubPageTopBar(title = "Widgets & sharing", onBack = onBack)
     }
   ) { innerPadding ->
     LazyColumn(
@@ -154,100 +381,325 @@ fun WidgetsStudioScreen(
         .fillMaxSize()
         .padding(innerPadding)
         .padding(horizontal = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(16.dp),
-      contentPadding = PaddingValues(bottom = 48.dp)
+      verticalArrangement = Arrangement.spacedBy(20.dp),
+      contentPadding = PaddingValues(top = 12.dp, bottom = 48.dp)
     ) {
-      // 1. Live Preview Pager
+      // 1. HABIT — Consistency Heatmap with a check button (small & medium)
       item {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-          HorizontalPager(
-            state = pagerState,
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          HabitHeatmapShowcaseCard(
+            habit = primarySingleHabit,
+            streak = getHabitStreak(primarySingleHabit),
+            doneToday = isHabitDoneOn(primarySingleHabit, today),
+            isDoneOnDate = { d -> isHabitDoneOn(primarySingleHabit, d) },
+            today = today,
+            weekDays = weekDays,
+            cornerRadius = radiusDp,
+            showStreak = settings.defaultWidgetShowStreak,
+            hideNames = settings.defaultWidgetHideNames,
+            onToggleToday = { handleToggleHabit(primarySingleHabit, today) }
+          )
+          Text(
+            text = "Habit — consistency heatmap with a check button (small & medium).",
+            color = Color(0xFF8E8E96),
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+            modifier = Modifier.padding(horizontal = 4.dp)
+          )
+        }
+      }
+
+      // 2. HABIT WEEK — This week at a glance; tap today's circle to complete
+      item {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          HabitWeekShowcaseCard(
+            habit = primarySingleHabit,
+            streak = getHabitStreak(primarySingleHabit),
+            weekDays = weekDays,
+            today = today,
+            isDoneOnDate = { d -> isHabitDoneOn(primarySingleHabit, d) },
+            cornerRadius = radiusDp,
+            showStreak = settings.defaultWidgetShowStreak,
+            hideNames = settings.defaultWidgetHideNames,
+            onToggleDate = { d -> handleToggleHabit(primarySingleHabit, d) }
+          )
+          Text(
+            text = "Habit Week — this week at a glance; tap today's circle to complete.",
+            color = Color(0xFF8E8E96),
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+            modifier = Modifier.padding(horizontal = 4.dp)
+          )
+        }
+      }
+
+      // 3. HABIT LIST — Up to 10 habits with this week's days (medium & large)
+      item {
+        val listHabits = if (showLargeHabitListPreview || habits.size > 3) {
+          displayHabitsForShowcase.take(10)
+        } else {
+          displayHabitsForShowcase.take(3)
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          HabitListShowcaseCard(
+            habits = listHabits,
+            weekDays = weekDays,
+            today = today,
+            showDayHeader = showLargeHabitListPreview || habits.size > 3,
+            getStreak = { h -> getHabitStreak(h) },
+            isDoneOnDate = { h, d -> isHabitDoneOn(h, d) },
+            cornerRadius = radiusDp,
+            showStreak = settings.defaultWidgetShowStreak,
+            hideNames = settings.defaultWidgetHideNames,
+            allowBackfill = settings.defaultWidgetAllowBackfill,
+            onToggleHabitOnDate = handleToggleHabit
+          )
+          Row(
             modifier = Modifier
               .fillMaxWidth()
-              .height(210.dp)
-          ) { page ->
-            LiveWidgetPreviewCard(
-              pageIndex = page,
-              habits = habits,
-              entries = entries,
-              goals = goals,
-              stepsByGoal = stepsByGoal,
-              settings = settings,
-              today = today,
-              accent = accent
+              .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = "Habit List — up to 10 habits with this week's days (medium & large).",
+              color = Color(0xFF8E8E96),
+              fontSize = 13.sp,
+              lineHeight = 18.sp,
+              modifier = Modifier.weight(1f)
+            )
+            Text(
+              text = if (showLargeHabitListPreview) "Medium" else "Large (10)",
+              color = accent,
+              fontSize = 12.sp,
+              fontWeight = FontWeight.SemiBold,
+              modifier = Modifier
+                .padding(start = 8.dp)
+                .clickable { showLargeHabitListPreview = !showLargeHabitListPreview }
             )
           }
+        }
+      }
 
-          Spacer(modifier = Modifier.height(10.dp))
-          Text(
-            text = widgetTitles[pagerState.currentPage],
-            color = colors.textPrimary,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
+      // 4. HABIT RINGS — Up to 8 habits as progress rings with 🔥 streak badges
+      item {
+        val ringHabits = displayHabitsForShowcase.take(4)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          HabitRingsShowcaseCard(
+            habits = ringHabits,
+            weekDays = weekDays,
+            today = today,
+            getStreak = { h -> getHabitStreak(h) },
+            isDoneOnDate = { h, d -> isHabitDoneOn(h, d) },
+            cornerRadius = radiusDp,
+            showStreak = settings.defaultWidgetShowStreak,
+            onToggleHabitToday = { h -> handleToggleHabit(h, today) }
           )
           Text(
-            text = widgetDescriptions[pagerState.currentPage],
-            color = colors.textSecondary,
-            fontSize = 12.sp
+            text = "Habit Rings — up to 8 habits as progress rings with 🔥 streak badges. Home screen on Android, lock screen on iPhone.",
+            color = Color(0xFF8E8E96),
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+            modifier = Modifier.padding(horizontal = 4.dp)
           )
+        }
+      }
 
-          Spacer(modifier = Modifier.height(10.dp))
-          Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(5) { idx ->
+      // 5. PIN WIDGET TO HOME SCREEN SECTION
+      item {
+        val widgetPinOptions = listOf(
+          "Habit" to SingleHabitWidgetReceiver::class.java,
+          "Habit Week" to TodayListWidgetReceiver::class.java,
+          "Habit List" to WeekGridWidgetReceiver::class.java,
+          "Habit Rings" to ProgressRingWidgetReceiver::class.java
+        )
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF141416))
+            .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(20.dp))
+            .padding(16.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+          SectionLabel("ADD WIDGET TO HOME SCREEN")
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            widgetPinOptions.forEachIndexed { idx, (label, _) ->
+              val selected = selectedWidgetToPin == idx
               Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
-                  .size(if (idx == pagerState.currentPage) 8.dp else 6.dp)
-                  .clip(CircleShape)
-                  .background(if (idx == pagerState.currentPage) accent else colors.borderSubtle)
-              )
+                  .weight(1f)
+                  .clip(RoundedCornerShape(50))
+                  .background(if (selected) accent else Color(0xFF202026))
+                  .clickable { selectedWidgetToPin = idx }
+                  .padding(vertical = 8.dp, horizontal = 4.dp)
+              ) {
+                Text(
+                  text = label,
+                  color = if (selected) Color(0xFF0A0A0D) else Color.White,
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  maxLines = 1
+                )
+              }
             }
           }
-
-          Spacer(modifier = Modifier.height(14.dp))
           Button(
             onClick = {
-              val receiverClass = when (pagerState.currentPage) {
-                0 -> WeekGridWidgetReceiver::class.java
-                1 -> TodayListWidgetReceiver::class.java
-                2 -> ProgressRingWidgetReceiver::class.java
-                3 -> SingleHabitWidgetReceiver::class.java
-                else -> GoalProgressWidgetReceiver::class.java
-              }
-              val mgr = AppWidgetManager.getInstance(context)
-              val provider = ComponentName(context, receiverClass)
-              if (mgr.isRequestPinAppWidgetSupported) {
-                val pinned = mgr.requestPinAppWidget(provider, null, null)
-                if (!pinned) showManualFallbackSheet = true
-              } else {
-                showManualFallbackSheet = true
-              }
+              val receiverClass = widgetPinOptions[selectedWidgetToPin].second
+              handlePinWidget(receiverClass)
             },
-            colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color(0xFF0A0A0D)),
+            colors = ButtonDefaults.buttonColors(
+              containerColor = accent,
+              contentColor = Color(0xFF0A0A0D)
+            ),
             modifier = Modifier
               .fillMaxWidth()
               .testTag("add_widget_home_btn")
           ) {
             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Add to home screen", fontWeight = FontWeight.Bold)
+            Text(
+              text = "Add ${widgetPinOptions[selectedWidgetToPin].first} widget to home screen",
+              fontWeight = FontWeight.Bold
+            )
           }
         }
       }
 
-      // 2. WIDGET STYLE Card
+      // 6. Interactive Quick Mark-Done Widget Checklist Card
       item {
         Column(
           modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(colors.surface)
-            .border(1.dp, colors.borderSubtle, RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF141416))
+            .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(20.dp))
+            .padding(16.dp)
+            .testTag("widgets_quick_checkin_card"),
+          verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          val doneCount = habits.count { h ->
+            ScheduleMatcher.isEntryDone(h, entriesByHabit[h.id]?.get(today))
+          }
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            SectionLabel("MARK DONE IN WIDGET")
+            Text(
+              text = "$doneCount of ${habits.size} finished today",
+              color = accent,
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Bold
+            )
+          }
+          Text(
+            text = "Tap any circle or check button on the widgets above — or tap a habit below — to mark it done.",
+            color = Color(0xFF8E8E96),
+            fontSize = 12.sp
+          )
+
+          if (habits.isEmpty()) {
+            Text(
+              text = "Showing interactive preview habits above. Add your own habits on Today to sync them with your widgets.",
+              color = Color(0xFF8E8E96),
+              fontSize = 13.sp
+            )
+          } else {
+            habits.forEach { h ->
+              val isDone = ScheduleMatcher.isEntryDone(h, entriesByHabit[h.id]?.get(today))
+              val hColor = habitColor(h.colorKey)
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(12.dp))
+                  .background(Color(0xFF1D1D22))
+                  .clickable { handleToggleHabit(h, today) }
+                  .padding(horizontal = 12.dp, vertical = 10.dp)
+                  .testTag("widget_quick_complete_${h.id}"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier = Modifier.weight(1f)
+                ) {
+                  HabitIconBadge(iconKey = h.iconKey, colorKey = h.colorKey, size = 32.dp)
+                  Spacer(modifier = Modifier.width(10.dp))
+                  Column {
+                    Text(
+                      text = h.name,
+                      color = if (isDone) Color(0xFF8E8E96) else Color.White,
+                      fontSize = 14.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      textDecoration = if (isDone) TextDecoration.LineThrough else TextDecoration.None
+                    )
+                    Text(
+                      text = if (isDone) "Finished for today" else "Tap to mark done",
+                      color = if (isDone) hColor else Color(0xFF8E8E96),
+                      fontSize = 11.sp
+                    )
+                  }
+                }
+                Box(
+                  contentAlignment = Alignment.Center,
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(if (isDone) hColor else hColor.copy(alpha = 0.16f))
+                    .border(1.dp, hColor, RoundedCornerShape(50))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isDone) {
+                      Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Done",
+                        tint = Color(0xFF0A0A0D),
+                        modifier = Modifier.size(14.dp)
+                      )
+                      Spacer(modifier = Modifier.width(4.dp))
+                      Text(
+                        text = "Done",
+                        color = Color(0xFF0A0A0D),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                      )
+                    } else {
+                      Text(
+                        text = "Mark done",
+                        color = hColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                      )
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 7. WIDGET STYLE Card
+      item {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF141416))
+            .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(20.dp))
             .padding(16.dp),
           verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
           SectionLabel("WIDGET STYLE")
 
-          Text("Theme", color = colors.textSecondary, fontSize = 12.sp)
+          Text("Theme", color = Color(0xFF8E8E96), fontSize = 12.sp)
           FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             WidgetThemeMode.entries.forEach { tm ->
               val selected = settings.defaultWidgetTheme == tm
@@ -259,13 +711,13 @@ fun WidgetsStudioScreen(
               Box(
                 modifier = Modifier
                   .clip(RoundedCornerShape(50))
-                  .background(if (selected) accent else colors.surfaceElevated)
+                  .background(if (selected) accent else Color(0xFF202026))
                   .clickable { onUpdateSettings { it.copy(defaultWidgetTheme = tm) } }
                   .padding(horizontal = 12.dp, vertical = 6.dp)
               ) {
                 Text(
                   text = label,
-                  color = if (selected) Color(0xFF0A0A0D) else colors.textPrimary,
+                  color = if (selected) Color(0xFF0A0A0D) else Color.White,
                   fontSize = 12.sp,
                   fontWeight = FontWeight.SemiBold
                 )
@@ -277,8 +729,8 @@ fun WidgetsStudioScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
           ) {
-            Text("Background opacity", color = colors.textSecondary, fontSize = 12.sp)
-            Text("${settings.defaultWidgetOpacity}%", color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("Background opacity", color = Color(0xFF8E8E96), fontSize = 12.sp)
+            Text("${settings.defaultWidgetOpacity}%", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
           }
           Slider(
             value = settings.defaultWidgetOpacity.toFloat(),
@@ -287,7 +739,7 @@ fun WidgetsStudioScreen(
             colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent)
           )
 
-          Text("Corner style", color = colors.textSecondary, fontSize = 12.sp)
+          Text("Corner style", color = Color(0xFF8E8E96), fontSize = 12.sp)
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             WidgetCornerStyle.entries.forEach { cs ->
               val selected = settings.defaultWidgetCorner == cs
@@ -295,13 +747,13 @@ fun WidgetsStudioScreen(
               Box(
                 modifier = Modifier
                   .clip(RoundedCornerShape(50))
-                  .background(if (selected) accent else colors.surfaceElevated)
+                  .background(if (selected) accent else Color(0xFF202026))
                   .clickable { onUpdateSettings { it.copy(defaultWidgetCorner = cs) } }
                   .padding(horizontal = 12.dp, vertical = 6.dp)
               ) {
                 Text(
                   text = label,
-                  color = if (selected) Color(0xFF0A0A0D) else colors.textPrimary,
+                  color = if (selected) Color(0xFF0A0A0D) else Color.White,
                   fontSize = 12.sp,
                   fontWeight = FontWeight.SemiBold
                 )
@@ -314,7 +766,7 @@ fun WidgetsStudioScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Text("Show streak fire", color = colors.textPrimary, fontSize = 13.sp)
+            Text("Show streak fire", color = Color.White, fontSize = 13.sp)
             Switch(
               checked = settings.defaultWidgetShowStreak,
               onCheckedChange = { v -> onUpdateSettings { it.copy(defaultWidgetShowStreak = v) } },
@@ -327,7 +779,7 @@ fun WidgetsStudioScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Text("Hide habit names (privacy)", color = colors.textPrimary, fontSize = 13.sp)
+            Text("Hide habit names (privacy)", color = Color.White, fontSize = 13.sp)
             Switch(
               checked = settings.defaultWidgetHideNames,
               onCheckedChange = { v -> onUpdateSettings { it.copy(defaultWidgetHideNames = v) } },
@@ -340,33 +792,25 @@ fun WidgetsStudioScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Text("Allow past-day backfill on grid", color = colors.textPrimary, fontSize = 13.sp)
+            Text("Allow past-day backfill on grid", color = Color.White, fontSize = 13.sp)
             Switch(
               checked = settings.defaultWidgetAllowBackfill,
               onCheckedChange = { v -> onUpdateSettings { it.copy(defaultWidgetAllowBackfill = v) } },
               colors = SwitchDefaults.colors(checkedTrackColor = accent, checkedThumbColor = Color(0xFF0A0A0D))
             )
           }
-        }
-      }
 
-      // 3. ACTIVE WIDGETS Card
-      item {
-        Column(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(colors.surface)
-            .border(1.dp, colors.borderSubtle, RoundedCornerShape(18.dp))
-            .padding(16.dp),
-          verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            SectionLabel("ACTIVE WIDGETS")
+            Text(
+              text = refreshFeedback ?: "Home screen widgets update automatically.",
+              color = Color(0xFF8E8E96),
+              fontSize = 12.sp,
+              modifier = Modifier.weight(1f)
+            )
             TextButton(
               onClick = {
                 scope.launch {
@@ -380,12 +824,6 @@ fun WidgetsStudioScreen(
               Text("Refresh all", color = accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
           }
-
-          Text(
-            text = refreshFeedback ?: "Home screen widgets update automatically whenever you mark a habit or goal step.",
-            color = colors.textSecondary,
-            fontSize = 12.sp
-          )
         }
       }
     }
@@ -424,207 +862,504 @@ fun WidgetsStudioScreen(
   }
 }
 
+/**
+ * Widget Card 1: "Habit — consistency heatmap with a check button (small & medium)."
+ */
 @Composable
-private fun LiveWidgetPreviewCard(
-  pageIndex: Int,
-  habits: List<Habit>,
-  entries: List<Entry>,
-  goals: List<Goal>,
-  stepsByGoal: Map<String, List<Step>>,
-  settings: AppSettings,
+private fun HabitHeatmapShowcaseCard(
+  habit: Habit,
+  streak: Int,
+  doneToday: Boolean,
+  isDoneOnDate: (LocalDate) -> Boolean,
   today: LocalDate,
-  accent: Color
+  weekDays: List<LocalDate>,
+  cornerRadius: androidx.compose.ui.unit.Dp,
+  showStreak: Boolean,
+  hideNames: Boolean,
+  onToggleToday: () -> Unit
 ) {
-  val radiusDp = when (settings.defaultWidgetCorner) {
-    WidgetCornerStyle.ROUNDED -> 22.dp
-    WidgetCornerStyle.EXTRA -> 30.dp
-  }
-  val bgAlpha = (settings.defaultWidgetOpacity / 100f).coerceIn(0.6f, 1f)
-  val cardBg = when (settings.defaultWidgetTheme) {
-    WidgetThemeMode.LIGHT -> Color(0xFFF6F6F9).copy(alpha = bgAlpha)
-    else -> Color(0xFF141419).copy(alpha = bgAlpha)
-  }
-  val textColor = if (settings.defaultWidgetTheme == WidgetThemeMode.LIGHT) Color(0xFF111114) else Color(0xFFF5F5F8)
-  val subColor = if (settings.defaultWidgetTheme == WidgetThemeMode.LIGHT) Color(0xFF5B5B66) else Color(0xFF9A9AA6)
+  val hColor = habitColor(habit.colorKey)
+  val cardBg = lerp(Color(0xFF101311), hColor, 0.11f)
+  val weekEnd = weekDays.lastOrNull() ?: today
+  val columns = 15
+  val rows = 7
 
-  val activeHabits = habits.take(4)
-  val entriesByHabit = remember(entries) {
-    entries.groupBy { it.habitId }.mapValues { (_, list) -> list.associateBy { it.date } }
-  }
-
-  Box(
+  Column(
     modifier = Modifier
-      .fillMaxSize()
-      .padding(horizontal = 8.dp)
-      .clip(RoundedCornerShape(radiusDp))
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(cornerRadius))
       .background(cardBg)
-      .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(radiusDp))
       .padding(16.dp),
-    contentAlignment = Alignment.Center
+    verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
-    when (pageIndex) {
-      0 -> {
-        // Week Grid 4x4
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("THIS WEEK", color = subColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            Text("M  T  W  T  F  S  S", color = subColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-          }
-          if (activeHabits.isEmpty()) {
-            Text("Create habits to preview Week Grid", color = subColor, fontSize = 12.sp)
-          } else {
-            activeHabits.take(3).forEachIndexed { idx, h ->
-              val hColor = habitColor(h.colorKey)
-              val displayTitle = if (settings.defaultWidgetHideNames) "Habit ${idx + 1}" else h.name
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-              ) {
-                Text(displayTitle, color = textColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
-                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                  for (i in 6 downTo 0) {
-                    val d = today.minusDays(i.toLong())
-                    val done = ScheduleMatcher.isEntryDone(h, entriesByHabit[h.id]?.get(d))
-                    Box(
-                      modifier = Modifier
-                        .size(14.dp)
-                        .clip(CircleShape)
-                        .background(if (done) hColor else Color.Transparent)
-                        .border(1.dp, if (done) hColor else subColor.copy(alpha = 0.4f), CircleShape)
-                    )
-                  }
-                }
-              }
-            }
-          }
+    // Top Header Row: Tinted Icon Badge + Title/Streak + Circular Check Button
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+          .size(38.dp)
+          .clip(RoundedCornerShape(10.dp))
+          .background(hColor.copy(alpha = 0.20f))
+      ) {
+        HabitIconView(
+          iconKey = habit.iconKey,
+          tint = hColor,
+          modifier = Modifier.size(20.dp),
+          emojiSize = 18.sp
+        )
+      }
+      Spacer(modifier = Modifier.width(12.dp))
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = if (hideNames) "Habit" else habit.name,
+          color = Color.White,
+          fontSize = 16.sp,
+          fontWeight = FontWeight.Bold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+        if (showStreak) {
+          Text(
+            text = "🔥 $streak",
+            color = Color(0xFFA0A8A2),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium
+          )
         }
       }
-      1 -> {
-        // Today List 4x3
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-          Text("TODAY'S HABITS", color = subColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-          if (activeHabits.isEmpty()) {
-            Text("Create habits to preview Today List", color = subColor, fontSize = 12.sp)
-          } else {
-            activeHabits.take(3).forEachIndexed { idx, h ->
-              val done = ScheduleMatcher.isEntryDone(h, entriesByHabit[h.id]?.get(today))
-              val hColor = habitColor(h.colorKey)
-              val displayTitle = if (settings.defaultWidgetHideNames) "Habit ${idx + 1}" else h.name
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Box(
-                  modifier = Modifier
-                    .size(16.dp)
-                    .clip(CircleShape)
-                    .background(if (done) hColor else Color.Transparent)
-                    .border(1.5.dp, hColor, CircleShape)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(displayTitle, color = textColor, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                if (settings.defaultWidgetShowStreak) {
-                  Text("🔥", fontSize = 11.sp)
-                }
-              }
-            }
-          }
-        }
+      Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+          .size(34.dp)
+          .clip(CircleShape)
+          .background(if (doneToday) hColor else hColor.copy(alpha = 0.20f))
+          .clickable(onClick = onToggleToday)
+          .testTag("widget_single_mark_done_btn")
+      ) {
+        Icon(
+          imageVector = Icons.Default.Check,
+          contentDescription = "Mark ${habit.name} done",
+          tint = if (doneToday) Color(0xFF0E1510) else Color(0xFFC2D4C6),
+          modifier = Modifier.size(17.dp)
+        )
       }
-      2 -> {
-        // Progress Ring 2x2
-        val total = habits.size.coerceAtLeast(1)
-        val doneCount = habits.count { ScheduleMatcher.isEntryDone(it, entriesByHabit[it.id]?.get(today)) }
-        val pct = ((doneCount.toFloat() / total) * 100).roundToInt()
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-          Box(contentAlignment = Alignment.Center, modifier = Modifier.size(92.dp)) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-              drawArc(
-                color = subColor.copy(alpha = 0.25f),
-                startAngle = 0f,
-                sweepAngle = 360f,
-                useCenter = false,
-                style = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
-              )
-              drawArc(
-                color = accent,
-                startAngle = -90f,
-                sweepAngle = 360f * (pct / 100f),
-                useCenter = false,
-                style = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
-              )
-            }
-            Text("$pct%", color = textColor, fontFamily = InstrumentSerif, fontSize = 24.sp)
-          }
-          Column {
-            Text("TODAY", color = subColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            Text("$doneCount of ${habits.size} done", color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-          }
-        }
-      }
-      3 -> {
-        // Single Habit 2x2
-        val h = habits.firstOrNull()
-        if (h == null) {
-          Text("Create a habit to preview Single Habit widget", color = subColor, fontSize = 12.sp)
-        } else {
-          val hColor = habitColor(h.colorKey)
-          Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            HabitIconBadge(iconKey = h.iconKey, colorKey = h.colorKey, size = 38.dp)
-            Text(if (settings.defaultWidgetHideNames) "Habit 1" else h.name, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-              for (i in 6 downTo 0) {
-                val d = today.minusDays(i.toLong())
-                val done = ScheduleMatcher.isEntryDone(h, entriesByHabit[h.id]?.get(d))
-                Box(
-                  modifier = Modifier
-                    .size(12.dp)
-                    .clip(CircleShape)
-                    .background(if (done) hColor else subColor.copy(alpha = 0.3f))
-                )
-              }
-            }
-          }
-        }
-      }
-      else -> {
-        // Goal Progress 4x2
-        val g = goals.firstOrNull()
-        if (g == null) {
-          Text("Create a Milestone goal to preview Goal Progress widget", color = subColor, fontSize = 12.sp)
-        } else {
-          val gSteps = stepsByGoal[g.id].orEmpty()
-          val progress = GoalStepEvaluator.calculateGoalProgress(gSteps)
-          val gColor = habitColor(g.colorKey)
-          Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-              Text(g.title, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-              Text("${(progress * 100).roundToInt()}%", color = gColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            }
+    }
+
+    // 7 x 15 Consistency Heatmap Grid
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+      for (col in 0 until columns) {
+        Column(
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+          for (row in 0 until rows) {
+            val daysAgo = (columns - 1 - col) * 7 + (rows - 1 - row)
+            val cellDate = weekEnd.minusDays(daysAgo.toLong())
+            val isBottomRightCell = col == columns - 1 && row == rows - 1
+            val isCellActive = isDoneOnDate(cellDate) ||
+              (cellDate == today && doneToday) ||
+              (isBottomRightCell && (doneToday || habit.id == "demo_walk"))
+
             Box(
               modifier = Modifier
                 .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(subColor.copy(alpha = 0.25f))
-            ) {
-              Box(
-                modifier = Modifier
-                  .fillMaxWidth(progress.coerceIn(0f, 1f))
-                  .height(8.dp)
-                  .clip(RoundedCornerShape(4.dp))
-                  .background(gColor)
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(3.5.dp))
+                .background(
+                  if (isCellActive) hColor else hColor.copy(alpha = 0.16f)
+                )
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Widget Card 2: "Habit Week — this week at a glance; tap today's circle to complete."
+ */
+@Composable
+private fun HabitWeekShowcaseCard(
+  habit: Habit,
+  streak: Int,
+  weekDays: List<LocalDate>,
+  today: LocalDate,
+  isDoneOnDate: (LocalDate) -> Boolean,
+  cornerRadius: androidx.compose.ui.unit.Dp,
+  showStreak: Boolean,
+  hideNames: Boolean,
+  onToggleDate: (LocalDate) -> Unit
+) {
+  val hColor = habitColor(habit.colorKey)
+  val cardBg = lerp(Color(0xFF101311), hColor, 0.11f)
+  val dayLabels = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+  // Highlight today's column (or Sunday index 6 if today is outside weekDays)
+  val highlightedIndex = remember(weekDays, today) {
+    val idx = weekDays.indexOf(today)
+    if (idx >= 0) idx else 6
+  }
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(cornerRadius))
+      .background(cardBg)
+      .padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp)
+  ) {
+    // Top Row: Icon Badge + Title/Streak
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+          .size(40.dp)
+          .clip(RoundedCornerShape(11.dp))
+          .background(hColor.copy(alpha = 0.20f))
+      ) {
+        HabitIconView(
+          iconKey = habit.iconKey,
+          tint = hColor,
+          modifier = Modifier.size(22.dp),
+          emojiSize = 19.sp
+        )
+      }
+      Spacer(modifier = Modifier.width(12.dp))
+      Column {
+        Text(
+          text = if (hideNames) "Habit" else habit.name,
+          color = Color.White,
+          fontSize = 16.sp,
+          fontWeight = FontWeight.Bold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+        if (showStreak) {
+          Text(
+            text = "🔥 $streak",
+            color = Color(0xFFA0A8A2),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium
+          )
+        }
+      }
+    }
+
+    // Bottom Row: 7 Day Columns with vertical rounded pill on Today
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      weekDays.forEachIndexed { idx, date ->
+        val isHighlightedToday = idx == highlightedIndex
+        val done = isDoneOnDate(date)
+        val label = dayLabels.getOrElse(idx) { ScheduleMatcher.dowShortLabel(date.dayOfWeek.value) }
+
+        Column(
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+          modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+              if (isHighlightedToday) hColor.copy(alpha = 0.18f) else Color.Transparent
+            )
+            .clickable { onToggleDate(date) }
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
+          Text(
+            text = label,
+            color = if (isHighlightedToday) Color.White else Color(0xFF8B998E),
+            fontSize = 11.sp,
+            fontWeight = if (isHighlightedToday) FontWeight.Bold else FontWeight.Medium
+          )
+          Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+              .size(26.dp)
+              .clip(CircleShape)
+              .background(if (done) hColor else Color.Transparent)
+              .border(
+                width = if (isHighlightedToday) 2.dp else 1.5.dp,
+                color = when {
+                  done -> hColor
+                  isHighlightedToday -> hColor
+                  else -> hColor.copy(alpha = 0.42f)
+                },
+                shape = CircleShape
+              )
+          ) {
+            if (done) {
+              Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "Done",
+                tint = Color(0xFF0E1510),
+                modifier = Modifier.size(14.dp)
               )
             }
-            val nextStep = gSteps.firstOrNull { !it.done }
-            Text(
-              text = if (nextStep != null) "Next: ${nextStep.title}" else "All steps complete!",
-              color = subColor,
-              fontSize = 12.sp,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Widget Card 3: "Habit List — up to 10 habits with this week's days (medium & large)."
+ * Matches both Screenshot 1 (Card 3) and Screenshot 2 (Large 10-habit home screen widget).
+ */
+@Composable
+private fun HabitListShowcaseCard(
+  habits: List<Habit>,
+  weekDays: List<LocalDate>,
+  today: LocalDate,
+  showDayHeader: Boolean,
+  getStreak: (Habit) -> Int,
+  isDoneOnDate: (Habit, LocalDate) -> Boolean,
+  cornerRadius: androidx.compose.ui.unit.Dp,
+  showStreak: Boolean,
+  hideNames: Boolean,
+  allowBackfill: Boolean,
+  onToggleHabitOnDate: (Habit, LocalDate) -> Unit
+) {
+  val shortLabels = listOf("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
+  val highlightedDayIndex = remember(weekDays, today) {
+    val idx = weekDays.indexOf(today)
+    if (idx >= 0) idx else 6
+  }
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(cornerRadius))
+      .background(Color(0xFF141416))
+      .padding(horizontal = 14.dp, vertical = 14.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp)
+  ) {
+    if (showDayHeader) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Spacer(modifier = Modifier.weight(1f))
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+          weekDays.forEachIndexed { idx, _ ->
+            val isTodayCol = idx == highlightedDayIndex
+            Box(
+              contentAlignment = Alignment.Center,
+              modifier = Modifier.width(19.dp)
+            ) {
+              Text(
+                text = shortLabels.getOrElse(idx) { "" },
+                color = if (isTodayCol) Color.White else Color(0xFF7E7E86),
+                fontSize = 11.sp,
+                fontWeight = if (isTodayCol) FontWeight.Bold else FontWeight.Medium
+              )
+            }
+          }
+        }
+      }
+    }
+
+    habits.forEachIndexed { idx, habit ->
+      val hColor = habitColor(habit.colorKey)
+      val streak = getStreak(habit)
+      val displayTitle = if (hideNames) "Habit ${idx + 1}" else habit.name
+
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("widget_grid_row_${habit.id}"),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        // Left: 32dp rounded-square tinted icon badge
+        Box(
+          contentAlignment = Alignment.Center,
+          modifier = Modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(hColor.copy(alpha = 0.20f))
+            .clickable { onToggleHabitOnDate(habit, today) }
+        ) {
+          HabitIconView(
+            iconKey = habit.iconKey,
+            tint = hColor,
+            modifier = Modifier.size(18.dp),
+            emojiSize = 15.sp
+          )
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        // Middle: Habit Name
+        Text(
+          text = displayTitle,
+          color = Color.White,
+          fontSize = 14.sp,
+          fontWeight = FontWeight.Medium,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier
+            .weight(1f)
+            .clickable { onToggleHabitOnDate(habit, today) }
+        )
+
+        // Streak label ("🔥 0" / "🔥 1")
+        if (showStreak) {
+          Text(
+            text = "🔥 $streak",
+            color = Color(0xFF9A9AA2),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 8.dp)
+          )
+        }
+
+        // Right: 7 day circles
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+          weekDays.forEachIndexed { dayIdx, d ->
+            val done = isDoneOnDate(habit, d)
+            val isTodayCol = dayIdx == highlightedDayIndex
+            val canToggle = isTodayCol || allowBackfill
+
+            Box(
+              contentAlignment = Alignment.Center,
+              modifier = Modifier
+                .size(19.dp)
+                .clip(CircleShape)
+                .background(
+                  when {
+                    done -> hColor
+                    isTodayCol -> hColor.copy(alpha = 0.12f)
+                    else -> hColor.copy(alpha = 0.22f)
+                  }
+                )
+                .then(
+                  if (isTodayCol && !done) {
+                    Modifier.border(1.6.dp, hColor, CircleShape)
+                  } else {
+                    Modifier
+                  }
+                )
+                .let { mod ->
+                  if (canToggle) mod.clickable { onToggleHabitOnDate(habit, d) } else mod
+                }
+                .testTag("widget_grid_cell_${habit.id}_$d")
+            ) {
+              if (done) {
+                Icon(
+                  imageVector = Icons.Default.Check,
+                  contentDescription = "Done",
+                  tint = Color(0xFF111216),
+                  modifier = Modifier.size(11.dp)
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Widget Card 4: "Habit Rings — up to 8 habits as progress rings with 🔥 streak badges."
+ */
+@Composable
+private fun HabitRingsShowcaseCard(
+  habits: List<Habit>,
+  weekDays: List<LocalDate>,
+  today: LocalDate,
+  getStreak: (Habit) -> Int,
+  isDoneOnDate: (Habit, LocalDate) -> Boolean,
+  cornerRadius: androidx.compose.ui.unit.Dp,
+  showStreak: Boolean,
+  onToggleHabitToday: (Habit) -> Unit
+) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(cornerRadius))
+      .background(Color(0xFF141416))
+      .padding(horizontal = 18.dp, vertical = 18.dp)
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      habits.take(4).forEach { habit ->
+        val hColor = habitColor(habit.colorKey)
+        val streak = getStreak(habit)
+        val doneDaysInWeek = weekDays.count { d -> isDoneOnDate(habit, d) }
+        val targetDays = when (habit.repeatType) {
+          RepeatType.WEEKLY -> (habit.timesPerPeriod ?: 1).coerceAtLeast(1)
+          else -> habit.daysOfWeek.size.coerceAtLeast(1)
+        }
+        val progress = (doneDaysInWeek.toFloat() / targetDays.toFloat()).coerceIn(0f, 1f)
+
+        Box(
+          contentAlignment = Alignment.Center,
+          modifier = Modifier
+            .size(64.dp)
+            .clickable { onToggleHabitToday(habit) }
+            .testTag("widget_ring_item_${habit.id}")
+        ) {
+          Canvas(modifier = Modifier.fillMaxSize().padding(3.dp)) {
+            val strokePx = 5.5.dp.toPx()
+            drawArc(
+              color = hColor.copy(alpha = 0.22f),
+              startAngle = 0f,
+              sweepAngle = 360f,
+              useCenter = false,
+              style = Stroke(width = strokePx, cap = StrokeCap.Round)
             )
+            if (progress > 0f) {
+              drawArc(
+                color = hColor,
+                startAngle = -90f,
+                sweepAngle = (360f * progress).coerceAtLeast(24f),
+                useCenter = false,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round)
+              )
+            }
+          }
+
+          HabitIconView(
+            iconKey = habit.iconKey,
+            tint = hColor,
+            modifier = Modifier.size(22.dp),
+            emojiSize = 18.sp
+          )
+
+          if (showStreak && streak > 0) {
+            Box(
+              contentAlignment = Alignment.Center,
+              modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = 2.dp, y = 2.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.White)
+                .padding(horizontal = 6.dp, vertical = 1.5.dp)
+            ) {
+              Text(
+                text = "🔥 $streak",
+                color = Color(0xFF111114),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 12.sp
+              )
+            }
           }
         }
       }
@@ -649,6 +1384,12 @@ fun BackupRestoreScreen(
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
 
+  val authService = remember(context) { context.appContainer.authService }
+  val cloudSyncRepo = remember(context) { context.appContainer.cloudSyncRepository }
+  val currentUser by authService.authStateFlow().collectAsState(initial = authService.currentUser)
+  val isSignedIn = currentUser != null
+
+  var isSigningInOrSyncing by remember { mutableStateOf(false) }
   var includeSettings by remember { mutableStateOf(true) }
   var statusMessage by remember { mutableStateOf<String?>(null) }
   var previewInfo by remember { mutableStateOf<BackupPreviewInfo?>(null) }
@@ -732,6 +1473,112 @@ fun BackupRestoreScreen(
       verticalArrangement = Arrangement.spacedBy(14.dp),
       contentPadding = PaddingValues(bottom = 48.dp)
     ) {
+      // Cloud Account Gate Card
+      item {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(colors.surface)
+            .border(
+              1.dp,
+              if (isSignedIn) accent.copy(alpha = 0.5f) else colors.danger.copy(alpha = 0.45f),
+              RoundedCornerShape(18.dp)
+            )
+            .padding(16.dp)
+            .testTag("backup_auth_card"),
+          verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          SectionLabel(if (isSignedIn) "GOOGLE CLOUD BACKUP ACTIVE" else "SIGN-IN REQUIRED FOR BACKUP")
+          if (!isSignedIn) {
+            Text(
+              text = "Backup is locked until you sign in",
+              color = colors.textPrimary,
+              fontSize = 16.sp,
+              fontWeight = FontWeight.Bold
+            )
+            Text(
+              text = "You entered without signing in. Your habits and widgets work offline on this device, but Cloud Backup, Export, Restore, and Auto-Backup require signing in with Google.",
+              color = colors.textSecondary,
+              fontSize = 13.sp
+            )
+            Button(
+              onClick = {
+                isSigningInOrSyncing = true
+                statusMessage = null
+                scope.launch {
+                  val res = authService.signInWithGoogle(context)
+                  val user = res.getOrNull()
+                  if (user != null) {
+                    val allHabits = db.habitDao().getAllHabits().map { it.toDomain() }
+                    val allEntries = db.entryDao().getAllEntries().map { it.toDomain() }
+                    cloudSyncRepo.syncAllToCloud(allHabits, allEntries)
+                    onUpdateSettings { it.copy(lastBackupAt = Instant.now()) }
+                    statusMessage = "Signed in as ${user.email ?: user.displayName ?: "Google user"}. Backup unlocked & synced!"
+                  } else {
+                    res.exceptionOrNull()?.let { err ->
+                      statusMessage = err.localizedMessage ?: "Sign-in was not completed."
+                    }
+                  }
+                  isSigningInOrSyncing = false
+                }
+              },
+              enabled = !isSigningInOrSyncing,
+              colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color(0xFF0A0A0D)),
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("backup_sign_in_btn")
+            ) {
+              Text(
+                text = if (isSigningInOrSyncing) "Connecting..." else "Sign in with Google to enable backup",
+                fontWeight = FontWeight.Bold
+              )
+            }
+          } else {
+            Text(
+              text = currentUser?.displayName ?: currentUser?.email ?: "Signed in with Google",
+              color = colors.textPrimary,
+              fontSize = 16.sp,
+              fontWeight = FontWeight.Bold
+            )
+            Text(
+              text = "${currentUser?.email ?: "Cloud account connected"} • Cloud Sync & Backup unlocked",
+              color = accent,
+              fontSize = 12.sp,
+              fontWeight = FontWeight.SemiBold
+            )
+            Button(
+              onClick = {
+                isSigningInOrSyncing = true
+                scope.launch {
+                  val allHabits = db.habitDao().getAllHabits().map { it.toDomain() }
+                  val allEntries = db.entryDao().getAllEntries().map { it.toDomain() }
+                  val syncRes = cloudSyncRepo.syncAllToCloud(allHabits, allEntries)
+                  isSigningInOrSyncing = false
+                  statusMessage = syncRes.fold(
+                    onSuccess = { count ->
+                      onUpdateSettings { it.copy(lastBackupAt = Instant.now()) }
+                      "Backed up $count habits and ${allEntries.size} check-ins to Cloud."
+                    },
+                    onFailure = { "Cloud backup failed: ${it.message}" }
+                  )
+                }
+              },
+              enabled = !isSigningInOrSyncing,
+              colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color(0xFF0A0A0D)),
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("cloud_sync_now_btn")
+            ) {
+              Text(
+                text = if (isSigningInOrSyncing) "Syncing..." else "Backup & Sync to Cloud now",
+                fontWeight = FontWeight.Bold
+              )
+            }
+          }
+        }
+      }
+
       // Status Card
       item {
         Column(
@@ -757,7 +1604,7 @@ fun BackupRestoreScreen(
             fontWeight = FontWeight.SemiBold
           )
           Text(
-            text = "All data is stored locally on this device.",
+            text = if (isSignedIn) "Synced with your Google account and stored locally." else "Stored locally only. Sign in above to unlock backups.",
             color = colors.textSecondary,
             fontSize = 12.sp
           )
@@ -769,7 +1616,7 @@ fun BackupRestoreScreen(
       }
 
       // Undo Pre-Restore Snapshot Banner (if available)
-      if (hasUndoSnapshot) {
+      if (hasUndoSnapshot && isSignedIn) {
         item {
           Row(
             modifier = Modifier
@@ -817,8 +1664,16 @@ fun BackupRestoreScreen(
           verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
           SectionLabel("EXPORT")
+          if (!isSignedIn) {
+            Text(
+              text = "Sign in with Google above to export backups.",
+              color = colors.textSecondary,
+              fontSize = 12.sp
+            )
+          }
           Button(
             onClick = { createJsonLauncher.launch("habit-radar-backup-$dateStamp.json") },
+            enabled = isSignedIn,
             colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color(0xFF0A0A0D)),
             modifier = Modifier
               .fillMaxWidth()
@@ -828,11 +1683,12 @@ fun BackupRestoreScreen(
           }
           OutlinedButton(
             onClick = { createCsvZipLauncher.launch("habit-radar-csv-$dateStamp.zip") },
+            enabled = isSignedIn,
             modifier = Modifier
               .fillMaxWidth()
               .testTag("export_csv_btn")
           ) {
-            Text("Export CSV (.zip)", color = colors.textPrimary)
+            Text("Export CSV (.zip)", color = if (isSignedIn) colors.textPrimary else colors.textSecondary)
           }
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -843,6 +1699,7 @@ fun BackupRestoreScreen(
             Switch(
               checked = includeSettings,
               onCheckedChange = { includeSettings = it },
+              enabled = isSignedIn,
               colors = SwitchDefaults.colors(checkedTrackColor = accent, checkedThumbColor = Color(0xFF0A0A0D))
             )
           }
@@ -861,13 +1718,25 @@ fun BackupRestoreScreen(
           verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
           SectionLabel("RESTORE")
+          if (!isSignedIn) {
+            Text(
+              text = "Sign in with Google above to restore from a backup.",
+              color = colors.textSecondary,
+              fontSize = 12.sp
+            )
+          }
           OutlinedButton(
             onClick = { openJsonLauncher.launch(arrayOf("application/json", "text/*", "*/*")) },
+            enabled = isSignedIn,
             modifier = Modifier
               .fillMaxWidth()
               .testTag("restore_json_btn")
           ) {
-            Text("Restore from backup (.json)", color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+            Text(
+              "Restore from backup (.json)",
+              color = if (isSignedIn) colors.textPrimary else colors.textSecondary,
+              fontWeight = FontWeight.SemiBold
+            )
           }
         }
       }
@@ -892,7 +1761,7 @@ fun BackupRestoreScreen(
             Column(modifier = Modifier.weight(1f)) {
               Text("Weekly auto-backup", color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
               Text(
-                text = settings.autoBackupFolderUri ?: "Choose a folder on your device",
+                text = if (!isSignedIn) "Sign in with Google to enable auto-backup" else (settings.autoBackupFolderUri ?: "Choose a folder on your device"),
                 color = colors.textSecondary,
                 fontSize = 11.sp,
                 maxLines = 1,
@@ -900,7 +1769,8 @@ fun BackupRestoreScreen(
               )
             }
             Switch(
-              checked = settings.autoBackupEnabled,
+              checked = settings.autoBackupEnabled && isSignedIn,
+              enabled = isSignedIn,
               onCheckedChange = { enabled ->
                 if (enabled && settings.autoBackupFolderUri == null) {
                   folderPickerLauncher.launch(null)
@@ -924,13 +1794,15 @@ fun BackupRestoreScreen(
                 Box(
                   modifier = Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(if (selected) accent else colors.surfaceElevated)
-                    .clickable { onUpdateSettings { it.copy(autoBackupKeep = count) } }
+                    .background(if (selected && isSignedIn) accent else colors.surfaceElevated)
+                    .let { mod ->
+                      if (isSignedIn) mod.clickable { onUpdateSettings { it.copy(autoBackupKeep = count) } } else mod
+                    }
                     .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                   Text(
                     text = "$count",
-                    color = if (selected) Color(0xFF0A0A0D) else colors.textPrimary,
+                    color = if (selected && isSignedIn) Color(0xFF0A0A0D) else colors.textPrimary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                   )

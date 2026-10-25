@@ -75,6 +75,9 @@
             android:label="@string/widget_week_grid_title">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_MARK_HABIT_DONE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_TOGGLE_HABIT_DONE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_MARK_STEP_DONE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
@@ -87,6 +90,9 @@
             android:label="@string/widget_today_list_title">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_MARK_HABIT_DONE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_TOGGLE_HABIT_DONE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_MARK_STEP_DONE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
@@ -99,6 +105,9 @@
             android:label="@string/widget_progress_ring_title">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_MARK_HABIT_DONE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_TOGGLE_HABIT_DONE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_MARK_STEP_DONE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
@@ -111,6 +120,9 @@
             android:label="@string/widget_single_habit_title">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_MARK_HABIT_DONE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_TOGGLE_HABIT_DONE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_MARK_STEP_DONE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
@@ -123,6 +135,9 @@
             android:label="@string/widget_goal_progress_title">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_MARK_HABIT_DONE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_TOGGLE_HABIT_DONE" />
+                <action android:name="com.example.feature.widgets.glance.ACTION_MARK_STEP_DONE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

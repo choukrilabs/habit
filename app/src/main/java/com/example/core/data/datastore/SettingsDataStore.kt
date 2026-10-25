@@ -48,6 +48,8 @@ class SettingsDataStore(private val context: Context) {
     val TODAY_LAYOUT = stringPreferencesKey("today_layout")
     val HIDE_COMPLETED = booleanPreferencesKey("hide_completed")
     val FULL_SCREEN_CELEBRATIONS = booleanPreferencesKey("full_screen_celebrations")
+    val SHOW_WEEKLY_PERFORMANCE_CARD = booleanPreferencesKey("show_weekly_performance_card")
+    val SHOW_MILESTONE_BADGES_SHELF = booleanPreferencesKey("show_milestone_badges_shelf")
     val SHOW_TAB_BAR = booleanPreferencesKey("show_tab_bar")
     val TAB_ORDER = stringPreferencesKey("tab_order")
     val HIDDEN_TABS = stringPreferencesKey("hidden_tabs")
@@ -118,6 +120,8 @@ class SettingsDataStore(private val context: Context) {
       todayLayout = prefs[Keys.TODAY_LAYOUT]?.let { runCatching { TodayLayout.valueOf(it) }.getOrNull() } ?: TodayLayout.CLASSIC,
       hideCompleted = prefs[Keys.HIDE_COMPLETED] ?: false,
       fullScreenCelebrations = prefs[Keys.FULL_SCREEN_CELEBRATIONS] ?: true,
+      showWeeklyPerformanceCard = prefs[Keys.SHOW_WEEKLY_PERFORMANCE_CARD] ?: true,
+      showMilestoneBadgesShelf = prefs[Keys.SHOW_MILESTONE_BADGES_SHELF] ?: true,
       showTabBar = prefs[Keys.SHOW_TAB_BAR] ?: true,
       tabOrder = tabOrderList,
       hiddenTabs = hiddenSet,
@@ -183,6 +187,8 @@ class SettingsDataStore(private val context: Context) {
       prefs[Keys.TODAY_LAYOUT] = settings.todayLayout.name
       prefs[Keys.HIDE_COMPLETED] = settings.hideCompleted
       prefs[Keys.FULL_SCREEN_CELEBRATIONS] = settings.fullScreenCelebrations
+      prefs[Keys.SHOW_WEEKLY_PERFORMANCE_CARD] = settings.showWeeklyPerformanceCard
+      prefs[Keys.SHOW_MILESTONE_BADGES_SHELF] = settings.showMilestoneBadgesShelf
       prefs[Keys.SHOW_TAB_BAR] = settings.showTabBar
       prefs[Keys.TAB_ORDER] = settings.tabOrder.joinToString(",") { it.name }
       prefs[Keys.HIDDEN_TABS] = settings.hiddenTabs.filter { it != HomeTab.TODAY }.joinToString(",") { it.name }

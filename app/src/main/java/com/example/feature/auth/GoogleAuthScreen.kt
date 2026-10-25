@@ -75,7 +75,8 @@ object GoogleAuthManager {
 @Composable
 fun GoogleAuthScreen(
   modifier: Modifier = Modifier,
-  authService: AuthService = LocalContext.current.appContainer.authService
+  authService: AuthService = LocalContext.current.appContainer.authService,
+  onContinueWithoutSignIn: () -> Unit = { authService.continueWithoutSignIn() }
 ) {
   val context = LocalContext.current
   val colors = LocalHabitRadarColors.current
@@ -218,6 +219,43 @@ fun GoogleAuthScreen(
               )
             }
           }
+
+          Spacer(modifier = Modifier.height(12.dp))
+
+          androidx.compose.material3.OutlinedButton(
+            onClick = {
+              authService.continueWithoutSignIn()
+              onContinueWithoutSignIn()
+            },
+            enabled = !isLoading,
+            shape = RoundedCornerShape(999.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, colors.surface2),
+            colors = ButtonDefaults.outlinedButtonColors(
+              contentColor = colors.textPrimary
+            ),
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(48.dp)
+              .testTag("continue_without_sign_in_button")
+          ) {
+            Text(
+              text = "Continue without signing in",
+              fontFamily = PlusJakartaSansFamily,
+              fontSize = 15.sp,
+              fontWeight = FontWeight.Medium
+            )
+          }
+
+          Spacer(modifier = Modifier.height(8.dp))
+
+          Text(
+            text = "Habits & widgets work offline. Cloud backup & restore stay disabled until you sign in.",
+            fontFamily = PlusJakartaSansFamily,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+            color = colors.textSecondary,
+            textAlign = TextAlign.Center
+          )
 
           if (errorMessage != null) {
             Spacer(modifier = Modifier.height(12.dp))

@@ -296,6 +296,9 @@ object StarterTemplatesCatalog {
     enableReminder: Boolean
   ): Pair<Habit, Reminder?> {
     val habitId = UUID.randomUUID().toString()
+    val normalizedCategory = com.example.core.domain.model.HabitCategoryCatalog
+      .normalizeTemplateCategory(template.category)
+      .ifBlank { template.category }
     val habit = Habit(
       id = habitId,
       name = template.name,
@@ -308,7 +311,9 @@ object StarterTemplatesCatalog {
       repeatType = template.repeatType,
       daysOfWeek = template.daysOfWeek,
       timesPerPeriod = template.timesPerPeriod,
-      group = template.group,
+      group = template.group ?: normalizedCategory,
+      category = normalizedCategory,
+      tags = listOfNotNull(normalizedCategory.takeIf { it.isNotBlank() }, template.group?.takeIf { it.isNotBlank() }).distinct(),
       startDate = today,
       sortOrder = sortOrder,
       createdAt = Instant.now()

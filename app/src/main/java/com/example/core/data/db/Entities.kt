@@ -33,7 +33,8 @@ import java.time.LocalTime
   tableName = "habits",
   indices = [
     Index(value = ["status", "sortOrder"]),
-    Index(value = ["groupName"])
+    Index(value = ["groupName"]),
+    Index(value = ["category"])
   ]
 )
 data class HabitEntity(
@@ -51,6 +52,8 @@ data class HabitEntity(
   val timesPerPeriod: Int?,
   val daysOfMonth: List<Int>,
   val groupName: String?,
+  val category: String? = null,
+  val tags: List<String> = emptyList(),
   val goalStreak: Int?,
   val askNote: Boolean,
   val status: HabitStatus,
@@ -273,6 +276,8 @@ fun HabitEntity.toDomain() = Habit(
   timesPerPeriod = timesPerPeriod,
   daysOfMonth = daysOfMonth,
   group = groupName,
+  category = category,
+  tags = tags,
   goalStreak = goalStreak,
   askNote = askNote,
   status = status,
@@ -298,6 +303,8 @@ fun Habit.toEntity() = HabitEntity(
   timesPerPeriod = timesPerPeriod,
   daysOfMonth = daysOfMonth,
   groupName = group,
+  category = category,
+  tags = tags,
   goalStreak = goalStreak,
   askNote = askNote,
   status = status,

@@ -34,6 +34,15 @@ class AuthService(
   private val customFirebaseAuth: FirebaseAuth? = null
 ) {
 
+  private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+  private val _skippedSignInFlow = kotlinx.coroutines.flow.MutableStateFlow(
+    prefs.getBoolean(KEY_SKIPPED_SIGN_IN, false)
+  )
+  val skippedSignInFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = _skippedSignInFlow
+
+  val isSkippedSignIn: Boolean
+    get() = _skippedSignInFlow.value
+
   val firebaseAuth: FirebaseAuth?
     get() = customFirebaseAuth ?: runCatching { FirebaseAuth.getInstance() }.getOrNull()
 
@@ -45,6 +54,16 @@ class AuthService(
 
   val isSignedIn: Boolean
     get() = currentUser != null
+
+  fun continueWithoutSignIn() {
+    prefs.edit().putBoolean(KEY_SKIPPED_SIGN_IN, true).apply()
+    _skippedSignInFlow.value = true
+  }
+
+  fun requireSignInPrompt() {
+    prefs.edit().putBoolean(KEY_SKIPPED_SIGN_IN, false).apply()
+    _skippedSignInFlow.value = false
+  }
 
   fun authStateFlow(): Flow<FirebaseUser?> {
     val auth = firebaseAuth ?: return flowOf(null)
@@ -117,9 +136,15 @@ class AuthService(
   }
 
   suspend fun signOut(context: Context = appContext) {
+    requireSignInPrompt()
     runCatching { firebaseAuth?.signOut() }
     runCatching {
       CredentialManager.create(context).clearCredentialState(ClearCredentialStateRequest())
     }
+  }
+
+  companion object {
+    private const val PREFS_NAME = "habit_radar_auth_prefs"
+    private const val KEY_SKIPPED_SIGN_IN = "skipped_sign_in"
   }
 }

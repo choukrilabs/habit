@@ -49,9 +49,14 @@ import com.example.core.util.SoundFeedbackManager
 import com.example.feature.extras.BackupRestoreScreen
 import com.example.feature.extras.OnboardingScreen
 import com.example.feature.extras.WidgetsStudioScreen
+import com.example.core.domain.model.Reminder
+import com.example.core.domain.model.MilestoneBadge
+import com.example.core.domain.usecase.MilestoneEngine
 import com.example.feature.habit.EditHabitBottomSheet
+import com.example.feature.habit.HabitCreationScreen
 import com.example.feature.habit.TemplateGalleryBottomSheet
 import com.example.feature.habitdetail.HabitDetailScreen
+import com.example.feature.milestones.BadgeUnlockCelebrationModal
 import com.example.feature.milestones.EditGoalBottomSheet
 import com.example.feature.milestones.GoalDetailScreen
 import com.example.feature.milestones.MilestonesListScreen
@@ -99,6 +104,12 @@ sealed interface ScreenRoute {
   data object WidgetsStudio : ScreenRoute
   data object BackupRestore : ScreenRoute
   data class HabitDetail(val habitId: String) : ScreenRoute
+  data class HabitCreation(
+    val editHabitId: String? = null,
+    val draftHabit: Habit? = null,
+    val draftReminders: List<Reminder> = emptyList()
+  ) : ScreenRoute
+  data object DataVisualization : ScreenRoute
   data object WelcomeTour : ScreenRoute
 }
 
@@ -123,8 +134,10 @@ class MainActivity : ComponentActivity() {
         )
         val currentUser by container.authService.authStateFlow()
           .collectAsState(initial = container.authService.currentUser)
+        val skippedSignIn by container.authService.skippedSignInFlow
+          .collectAsState()
 
-        if (currentUser == null) {
+        if (currentUser == null && !skippedSignIn) {
           val settings by mainViewModel.settingsFlow.collectAsState()
           HabitRadarTheme(
             themeMode = settings.theme,
@@ -133,7 +146,10 @@ class MainActivity : ComponentActivity() {
             todayLayout = settings.todayLayout
           ) {
             com.example.feature.auth.GoogleAuthScreen(
-              authService = container.authService
+              authService = container.authService,
+              onContinueWithoutSignIn = {
+                container.authService.continueWithoutSignIn()
+              }
             )
           }
         } else {
@@ -178,6 +194,8 @@ fun HabitRadarAppRoot(
   val allPauses by viewModel.allPausesFlow.collectAsState()
   val allGoals by viewModel.allGoalsFlow.collectAsState()
   val allSteps by viewModel.allStepsFlow.collectAsState()
+  val weeklyPerformanceSummary by viewModel.weeklyPerformanceSummaryFlow.collectAsState()
+  val milestoneSummary by viewModel.milestoneSummaryFlow.collectAsState()
 
   val today = remember(settings.dayRollover) {
     LogicalDateCalculator.now(settings.dayRollover)
@@ -231,6 +249,7 @@ fun HabitRadarAppRoot(
   // Celebration overlay state
   var celebrationHeadline by remember { mutableStateOf<String?>(null) }
   var celebrationSubtitle by remember { mutableStateOf<String?>(null) }
+  var newlyUnlockedBadgesCelebration by remember { mutableStateOf<List<MilestoneBadge>>(emptyList()) }
 
   // Handle deep links (Section 7.6 & 8)
   LaunchedEffect(deepLinkUri) {
@@ -291,6 +310,14 @@ fun HabitRadarAppRoot(
     if (allDone) {
       celebrationHeadline = "All *done.*"
       celebrationSubtitle = "Every scheduled habit for today is complete."
+    }
+  }
+
+  suspend fun evaluateAndCelebrateUnlockedBadges(previousUnlockedIds: Set<String>) {
+    val updatedSummary = repository.calculateMilestoneSummary(today = today)
+    val newlyUnlocked = MilestoneEngine.detectNewlyUnlockedBadges(previousUnlockedIds, updatedSummary)
+    if (newlyUnlocked.isNotEmpty()) {
+      newlyUnlockedBadgesCelebration = newlyUnlocked
     }
   }
 
@@ -358,24 +385,29 @@ fun HabitRadarAppRoot(
                   today = today,
                   onOpenMenu = { navigateTo(ScreenRoute.Menu) },
                   onNewHabit = {
-                    editingHabit = null
-                    showEditHabitSheet = true
+                    navigateTo(ScreenRoute.HabitCreation())
                   },
                   onOpenHabitDetail = { hId -> navigateTo(ScreenRoute.HabitDetail(hId)) },
                   onToggleHabitToday = { habit, note ->
                     scope.launch {
+                      val prevUnlocked = repository.calculateMilestoneSummary(today = today)
+                        .unlockedBadges.map { it.id }.toSet()
                       val nowDone = repository.toggleTaskEntry(habit.id, today, note)
                       if (nowDone) {
                         if (settings.sounds) SoundFeedbackManager.playSoftTick(true)
+                        evaluateAndCelebrateUnlockedBadges(prevUnlocked)
                         checkAllTodayDoneAndCelebrate(habit.id)
                       }
                     }
                   },
                   onLogQuantitativeToday = { habit, value, note ->
                     scope.launch {
+                      val prevUnlocked = repository.calculateMilestoneSummary(today = today)
+                        .unlockedBadges.map { it.id }.toSet()
                       repository.setQuantitativeEntry(habit.id, today, value, note)
                       if (value >= (habit.targetValue ?: 1.0)) {
                         if (settings.sounds) SoundFeedbackManager.playSoftTick(true)
+                        evaluateAndCelebrateUnlockedBadges(prevUnlocked)
                         checkAllTodayDoneAndCelebrate(habit.id)
                       }
                     }
@@ -384,8 +416,7 @@ fun HabitRadarAppRoot(
                     scope.launch { repository.skipHabitOnDate(habit.id, today) }
                   },
                   onEditHabit = { habit ->
-                    editingHabit = habit
-                    showEditHabitSheet = true
+                    navigateTo(ScreenRoute.HabitCreation(editHabitId = habit.id))
                   },
                   onPauseHabitPrompt = { habit -> pausingHabit = habit },
                   onResumeHabit = { habit ->
@@ -402,7 +433,28 @@ fun HabitRadarAppRoot(
                   onBrowseIdeas = { showTemplateGallerySheet = true },
                   onDismissCoachmark = {
                     updateSettings { it.copy(coachmarkShown = true) }
-                  }
+                  },
+                  onLogCompletion = { log ->
+                    scope.launch {
+                      val prevUnlocked = repository.calculateMilestoneSummary(today = today)
+                        .unlockedBadges.map { it.id }.toSet()
+                      repository.logHabitCompletion(log)
+                      if (log.isCompleted) {
+                        if (log.resolvedDate == today && settings.sounds) SoundFeedbackManager.playSoftTick(true)
+                        evaluateAndCelebrateUnlockedBadges(prevUnlocked)
+                        if (log.resolvedDate == today) {
+                          checkAllTodayDoneAndCelebrate(log.habitId)
+                        }
+                      }
+                    }
+                  },
+                  onClearDateEntry = { habit, date ->
+                    scope.launch { repository.deleteEntryOnDate(habit.id, date) }
+                  },
+                  weeklySummary = weeklyPerformanceSummary,
+                  onOpenAnalytics = { navigateTo(ScreenRoute.DataVisualization) },
+                  milestoneSummary = milestoneSummary,
+                  onOpenMilestonesBadges = { navigateTo(ScreenRoute.MilestonesList) }
                 )
               }
               HomeTab.WEEKLY -> {
@@ -415,8 +467,7 @@ fun HabitRadarAppRoot(
                   today = today,
                   onOpenMenu = { navigateTo(ScreenRoute.Menu) },
                   onNewHabit = {
-                    editingHabit = null
-                    showEditHabitSheet = true
+                    navigateTo(ScreenRoute.HabitCreation())
                   },
                   onOpenHabitDetail = { hId -> navigateTo(ScreenRoute.HabitDetail(hId)) },
                   onToggleDate = { habit, date ->
@@ -430,7 +481,8 @@ fun HabitRadarAppRoot(
                         repository.setQuantitativeEntry(habit.id, date, nextVal, existing?.note)
                       }
                     }
-                  }
+                  },
+                  onOpenAnalytics = { navigateTo(ScreenRoute.DataVisualization) }
                 )
               }
               HomeTab.MONTHLY -> {
@@ -443,8 +495,7 @@ fun HabitRadarAppRoot(
                   today = today,
                   onOpenMenu = { navigateTo(ScreenRoute.Menu) },
                   onNewHabit = {
-                    editingHabit = null
-                    showEditHabitSheet = true
+                    navigateTo(ScreenRoute.HabitCreation())
                   },
                   onOpenHabitDetail = { hId -> navigateTo(ScreenRoute.HabitDetail(hId)) },
                   onToggleDate = { habit, date ->
@@ -470,10 +521,10 @@ fun HabitRadarAppRoot(
                   today = today,
                   onOpenMenu = { navigateTo(ScreenRoute.Menu) },
                   onNewHabit = {
-                    editingHabit = null
-                    showEditHabitSheet = true
+                    navigateTo(ScreenRoute.HabitCreation())
                   },
-                  onOpenHabitDetail = { hId -> navigateTo(ScreenRoute.HabitDetail(hId)) }
+                  onOpenHabitDetail = { hId -> navigateTo(ScreenRoute.HabitDetail(hId)) },
+                  onOpenDataVisualization = { navigateTo(ScreenRoute.DataVisualization) }
                 )
               }
             }
@@ -500,7 +551,10 @@ fun HabitRadarAppRoot(
               onNavigateMonthlyRecap = { navigateTo(ScreenRoute.MonthlyRecap) },
               onNavigateYearInReview = { navigateTo(ScreenRoute.YearInReview) },
               onNavigateMilestones = { navigateTo(ScreenRoute.MilestonesList) },
-              onNavigateWidgets = { navigateTo(ScreenRoute.WidgetsStudio) }
+              onNavigateWidgets = { navigateTo(ScreenRoute.WidgetsStudio) },
+              onNavigateDataVisualization = { navigateTo(ScreenRoute.DataVisualization) },
+              settings = settings,
+              onUpdateSettings = updateSettings
             )
           }
 
@@ -541,7 +595,13 @@ fun HabitRadarAppRoot(
                 scope.launch { repository.setAllHabitRemindersEnabled(hId, enabled) }
               },
               onOpenHabitDetailReminders = { hId -> navigateTo(ScreenRoute.HabitDetail(hId)) },
-              onOpenGoalDetail = { gId -> navigateTo(ScreenRoute.GoalDetail(gId)) }
+              onOpenGoalDetail = { gId -> navigateTo(ScreenRoute.GoalDetail(gId)) },
+              onSaveHabitReminder = { reminder ->
+                scope.launch { repository.saveReminder(reminder) }
+              },
+              onDeleteHabitReminder = { reminderId ->
+                scope.launch { repository.deleteReminder(reminderId) }
+              }
             )
           }
 
@@ -640,7 +700,8 @@ fun HabitRadarAppRoot(
                     celebrationSubtitle = "Every milestone step is done!"
                   }
                 }
-              }
+              },
+              milestoneSummary = milestoneSummary
             )
           }
 
@@ -719,7 +780,17 @@ fun HabitRadarAppRoot(
               settings = settings,
               today = today,
               onUpdateSettings = updateSettings,
-              onBack = { popBack() }
+              onBack = { popBack() },
+              onToggleHabitOnDate = { habit, date ->
+                if (date == today && settings.sounds) {
+                  SoundFeedbackManager.playSoftTick(true)
+                }
+              },
+              onToggleGoalStep = { _ ->
+                if (settings.sounds) {
+                  SoundFeedbackManager.playSoftTick(true)
+                }
+              }
             )
           }
 
@@ -750,8 +821,7 @@ fun HabitRadarAppRoot(
                 today = today,
                 onBack = { popBack() },
                 onEditHabit = {
-                  editingHabit = habit
-                  showEditHabitSheet = true
+                  navigateTo(ScreenRoute.HabitCreation(editHabitId = habit.id))
                 },
                 onToggleDate = { date, note ->
                   scope.launch {
@@ -807,9 +877,65 @@ fun HabitRadarAppRoot(
                 },
                 onToggleAllReminders = { enabled ->
                   scope.launch { repository.setAllHabitRemindersEnabled(habit.id, enabled) }
+                },
+                onLogCompletion = { log ->
+                  scope.launch {
+                    val prevUnlocked = repository.calculateMilestoneSummary(today = today)
+                      .unlockedBadges.map { it.id }.toSet()
+                    repository.logHabitCompletion(log)
+                    if (log.isCompleted) {
+                      if (log.resolvedDate == today && settings.sounds) {
+                        SoundFeedbackManager.playSoftTick(true)
+                      }
+                      evaluateAndCelebrateUnlockedBadges(prevUnlocked)
+                    }
+                  }
                 }
               )
             }
+          }
+
+          is ScreenRoute.HabitCreation -> {
+            val targetHabit = route.editHabitId?.let { habitsMap[it] } ?: route.draftHabit
+            val targetReminders = if (route.editHabitId != null) {
+              remindersByHabit[route.editHabitId].orEmpty()
+            } else {
+              route.draftReminders
+            }
+            HabitCreationScreen(
+              today = today,
+              existingHabit = targetHabit,
+              existingReminders = targetReminders,
+              isDraftTemplate = route.editHabitId == null && route.draftHabit != null,
+              onBack = { popBack() },
+              onHabitSaved = { popBack() },
+              onPauseRequest = { target ->
+                popBack()
+                pausingHabit = target
+              },
+              onArchiveRequest = { target ->
+                scope.launch {
+                  repository.archiveHabit(target.id)
+                  popBack()
+                }
+              },
+              onDeleteForeverRequest = { target ->
+                popBack()
+                deletingHabitConfirm = target
+              }
+            )
+          }
+
+          ScreenRoute.DataVisualization -> {
+            com.example.feature.analytics.DataVisualizationScreen(
+              habits = activeHabits,
+              entriesByHabit = entriesByHabit,
+              pausesByHabit = pausesByHabit,
+              settings = settings,
+              today = today,
+              onBack = { popBack() },
+              onOpenHabitDetail = { hId -> navigateTo(ScreenRoute.HabitDetail(hId)) }
+            )
           }
 
           ScreenRoute.WelcomeTour -> {
@@ -859,14 +985,18 @@ fun HabitRadarAppRoot(
             onDismiss = { showTemplateGallerySheet = false },
             onPickTemplate = { tpl ->
               showTemplateGallerySheet = false
-              val (draftHabit, _) = StarterTemplatesCatalog.toHabitAndOptionalReminder(
+              val (draftHabit, draftRem) = StarterTemplatesCatalog.toHabitAndOptionalReminder(
                 template = tpl,
                 sortOrder = allHabits.size,
                 today = today,
                 enableReminder = true
               )
-              editingHabit = draftHabit
-              showEditHabitSheet = true
+              navigateTo(
+                ScreenRoute.HabitCreation(
+                  draftHabit = draftHabit,
+                  draftReminders = listOfNotNull(draftRem)
+                )
+              )
             }
           )
         }
@@ -938,9 +1068,23 @@ fun HabitRadarAppRoot(
           )
         }
 
+        // Instant Badge Unlock Celebration Modal
+        if (newlyUnlockedBadgesCelebration.isNotEmpty()) {
+          val highestBadge = newlyUnlockedBadgesCelebration.maxByOrNull { it.tier.ordinal * 1000 + it.targetValue }
+            ?: newlyUnlockedBadgesCelebration.first()
+          BadgeUnlockCelebrationModal(
+            badge = highestBadge,
+            onDismiss = { newlyUnlockedBadgesCelebration = emptyList() },
+            onViewAllBadges = {
+              newlyUnlockedBadgesCelebration = emptyList()
+              navigateTo(ScreenRoute.MilestonesList)
+            }
+          )
+        }
+
         // Full-Screen Celebration Overlay
         FullScreenCelebrationOverlay(
-          visible = celebrationHeadline != null,
+          visible = celebrationHeadline != null && newlyUnlockedBadgesCelebration.isEmpty(),
           headlineText = celebrationHeadline ?: "All *done.*",
           subtitleText = celebrationSubtitle ?: "Every small mark for today is complete.",
           onDismiss = {

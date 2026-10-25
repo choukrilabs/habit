@@ -18,8 +18,10 @@ import com.example.core.domain.model.GoalStatus
 import com.example.core.domain.model.Habit
 import com.example.core.domain.model.HabitPause
 import com.example.core.domain.model.HabitStatus
+import com.example.core.domain.model.MilestoneSummary
 import com.example.core.domain.model.Reminder
 import com.example.core.domain.model.Step
+import com.example.core.domain.model.WeeklyPerformanceSummary
 import com.example.core.domain.model.WidgetConfig
 import com.example.core.domain.usecase.AnalyticsCalculator
 import com.example.core.domain.usecase.AnalyticsPeriod
@@ -126,6 +128,20 @@ class MainAppViewModel(
       scope = viewModelScope,
       started = SharingStarted.WhileSubscribed(5_000),
       initialValue = emptyList()
+    )
+
+  val weeklyPerformanceSummaryFlow: StateFlow<WeeklyPerformanceSummary> = repository.weeklyPerformanceSummaryFlow
+    .stateIn(
+      scope = viewModelScope,
+      started = SharingStarted.WhileSubscribed(5_000),
+      initialValue = WeeklyPerformanceSummary()
+    )
+
+  val milestoneSummaryFlow: StateFlow<MilestoneSummary> = repository.milestoneSummaryFlow
+    .stateIn(
+      scope = viewModelScope,
+      started = SharingStarted.WhileSubscribed(5_000),
+      initialValue = MilestoneSummary()
     )
 
   fun updateSettings(transform: (AppSettings) -> AppSettings) {
@@ -482,6 +498,11 @@ class HabitRadarViewModelFactory(
           backupManager = c.backupManager
         ) as T
       }
+      modelClass.isAssignableFrom(com.example.feature.habit.HabitCreationViewModel::class.java) -> {
+        com.example.feature.habit.HabitCreationViewModel(
+          repository = c.habitRepository
+        ) as T
+      }
       else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
     }
   }
@@ -490,3 +511,8 @@ class HabitRadarViewModelFactory(
     val Factory: ViewModelProvider.Factory = HabitRadarViewModelFactory()
   }
 }
+
+typealias HabitCreationViewModel = com.example.feature.habit.HabitCreationViewModel
+typealias HabitCreationUiState = com.example.feature.habit.HabitCreationUiState
+typealias FrequencyPreset = com.example.feature.habit.FrequencyPreset
+

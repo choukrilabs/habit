@@ -35,14 +35,14 @@
     <string name="settings_archived_habits">Archived habits</string>
     <string name="settings_welcome_tour">Welcome tour</string>
     <string name="settings_offline_footer">Habit Radar works fully offline. Nothing leaves the phone unless you export a backup.</string>
-    <string name="widget_week_grid_title">Habit Radar • Week Grid (4×2)</string>
-    <string name="widget_today_list_title">Habit Radar • Today\'s Habits (4×3)</string>
-    <string name="widget_progress_ring_title">Habit Radar • Progress Ring (2×2)</string>
-    <string name="widget_single_habit_title">Habit Radar • Single Habit (2×2)</string>
+    <string name="widget_week_grid_title">Habit List (4×4)</string>
+    <string name="widget_today_list_title">Habit Week (4×2)</string>
+    <string name="widget_progress_ring_title">Habit Rings (4×2)</string>
+    <string name="widget_single_habit_title">Habit Heatmap (4×2)</string>
     <string name="widget_goal_progress_title">Habit Radar • Goal Progress (4×2)</string>
-    <string name="widget_week_grid_desc">7-day matrix with streaks and instant check circles</string>
-    <string name="widget_today_list_desc">Today\'s checklist with day-signal band</string>
-    <string name="widget_progress_ring_desc">Compact completion ring and daily run</string>
-    <string name="widget_single_habit_desc">Focus on one habit with a 7-dot week strip</string>
+    <string name="widget_week_grid_desc">Habit List — up to 10 habits with this week\'s days (medium &amp; large).</string>
+    <string name="widget_today_list_desc">Habit Week — this week at a glance; tap today\'s circle to complete.</string>
+    <string name="widget_progress_ring_desc">Habit Rings — up to 8 habits as progress rings with 🔥 streak badges.</string>
+    <string name="widget_single_habit_desc">Habit — consistency heatmap with a check button (small &amp; medium).</string>
     <string name="widget_goal_desc">Track goal steps and mark manual milestones</string>
 </resources>

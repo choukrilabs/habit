@@ -147,6 +147,10 @@ fun EditHabitBottomSheet(
   // More section state
   var showMoreSection by remember { mutableStateOf(false) }
   var groupName by remember { mutableStateOf(existingHabit?.group ?: "") }
+  var category by remember { mutableStateOf(existingHabit?.category ?: existingHabit?.group ?: "") }
+  val selectedTags = remember {
+    mutableStateListOf<String>().apply { addAll(existingHabit?.tags.orEmpty()) }
+  }
   var goalStreakStr by remember { mutableStateOf(existingHabit?.goalStreak?.toString() ?: "") }
   var askNote by remember { mutableStateOf(existingHabit?.askNote ?: false) }
 
@@ -221,7 +225,9 @@ fun EditHabitBottomSheet(
                 daysOfWeek = selectedDaysOfWeek.sorted(),
                 timesPerPeriod = if (repeatType != RepeatType.DAILY) timesPerPeriod else null,
                 daysOfMonth = if (repeatType == RepeatType.MONTHLY) selectedDaysOfMonth.sorted() else emptyList(),
-                group = groupName.trim().ifBlank { null },
+                group = groupName.trim().ifBlank { category.trim().ifBlank { null } },
+                category = category.trim().ifBlank { null },
+                tags = selectedTags.toList(),
                 goalStreak = goalStreakStr.toIntOrNull(),
                 askNote = askNote,
                 status = existingHabit?.status ?: com.example.core.domain.model.HabitStatus.ACTIVE,
@@ -1069,7 +1075,7 @@ fun ReminderEditorBottomSheet(
 
       Spacer(modifier = Modifier.height(16.dp))
 
-      // Time dial / wheel controls
+      // Time dial / wheel controls + quick daily time presets
       HabitRadarCard {
         Row(
           verticalAlignment = Alignment.CenterVertically,
@@ -1081,19 +1087,26 @@ fun ReminderEditorBottomSheet(
               "▲",
               color = colors.accent,
               fontSize = 18.sp,
-              modifier = Modifier.clickable { hour = (hour + 1) % 24 }.padding(8.dp)
+              modifier = Modifier
+                .clickable { hour = (hour + 1) % 24 }
+                .padding(8.dp)
+                .testTag("reminder_hour_increment")
             )
             Text(
               text = String.format("%02d", hour),
               fontFamily = InstrumentSerifFamily,
               fontSize = 44.sp,
-              color = colors.textPrimary
+              color = colors.textPrimary,
+              modifier = Modifier.testTag("reminder_hour_value")
             )
             Text(
               "▼",
               color = colors.accent,
               fontSize = 18.sp,
-              modifier = Modifier.clickable { hour = (hour + 23) % 24 }.padding(8.dp)
+              modifier = Modifier
+                .clickable { hour = (hour + 23) % 24 }
+                .padding(8.dp)
+                .testTag("reminder_hour_decrement")
             )
           }
           Text(
@@ -1107,20 +1120,62 @@ fun ReminderEditorBottomSheet(
               "▲",
               color = colors.accent,
               fontSize = 18.sp,
-              modifier = Modifier.clickable { minute = (minute + 5) % 60 }.padding(8.dp)
+              modifier = Modifier
+                .clickable { minute = (minute + 5) % 60 }
+                .padding(8.dp)
+                .testTag("reminder_minute_increment")
             )
             Text(
               text = String.format("%02d", minute),
               fontFamily = InstrumentSerifFamily,
               fontSize = 44.sp,
-              color = colors.textPrimary
+              color = colors.textPrimary,
+              modifier = Modifier.testTag("reminder_minute_value")
             )
             Text(
               "▼",
               color = colors.accent,
               fontSize = 18.sp,
-              modifier = Modifier.clickable { minute = (minute + 55) % 60 }.padding(8.dp)
+              modifier = Modifier
+                .clickable { minute = (minute + 55) % 60 }
+                .padding(8.dp)
+                .testTag("reminder_minute_decrement")
             )
+          }
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          listOf(
+            "07:00" to LocalTime.of(7, 0),
+            "09:00" to LocalTime.of(9, 0),
+            "12:00" to LocalTime.of(12, 0),
+            "18:00" to LocalTime.of(18, 0),
+            "21:00" to LocalTime.of(21, 0)
+          ).forEach { (label, presetTime) ->
+            val isSelectedPreset = hour == presetTime.hour && minute == presetTime.minute
+            Box(
+              contentAlignment = Alignment.Center,
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (isSelectedPreset) colors.accent else colors.surface2)
+                .clickable {
+                  hour = presetTime.hour
+                  minute = presetTime.minute
+                }
+                .padding(vertical = 8.dp)
+                .testTag("reminder_preset_$label")
+            ) {
+              Text(
+                text = label,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isSelectedPreset) colors.onAccent else colors.textPrimary
+              )
+            }
           }
         }
       }

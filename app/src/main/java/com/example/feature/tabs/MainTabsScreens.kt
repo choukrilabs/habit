@@ -71,14 +71,19 @@ import com.example.core.domain.model.CardDensity
 import com.example.core.domain.model.Entry
 import com.example.core.domain.model.EntryStatus
 import com.example.core.domain.model.Habit
+import com.example.core.domain.model.HabitCompletionLog
 import com.example.core.domain.model.HabitPause
 import com.example.core.domain.model.HeadlineMode
+import com.example.core.domain.model.MilestoneSummary
 import com.example.core.domain.model.TodayLayout
 import com.example.core.domain.model.TrackType
+import com.example.core.domain.model.WeeklyPerformanceSummary
 import com.example.core.domain.usecase.AnalyticsCalculator
 import com.example.core.domain.usecase.LogicalDateCalculator
+import com.example.core.domain.usecase.MilestoneEngine
 import com.example.core.domain.usecase.ScheduleMatcher
 import com.example.core.domain.usecase.StreakCalculator
+import com.example.core.domain.usecase.WeeklyPerformanceCalculator
 import com.example.core.ui.components.CardHairline
 import com.example.core.ui.components.HabitCheckCircle
 import com.example.core.ui.components.HabitIconView
@@ -91,6 +96,8 @@ import com.example.core.ui.theme.LocalHabitRadarColors
 import com.example.core.ui.theme.PlusJakartaSansFamily
 import com.example.core.ui.theme.habitTint
 import com.example.core.ui.theme.parseHexColor
+import com.example.feature.habit.HabitCompletionLogBottomSheet
+import com.example.feature.milestones.TodayMilestoneShelfCard
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -121,7 +128,13 @@ fun TodayTabScreen(
   onDeleteHabit: (Habit) -> Unit,
   onSelectGroupFilter: (String?) -> Unit,
   onBrowseIdeas: () -> Unit,
-  onDismissCoachmark: () -> Unit
+  onDismissCoachmark: () -> Unit,
+  onLogCompletion: (HabitCompletionLog) -> Unit = {},
+  onClearDateEntry: (Habit, LocalDate) -> Unit = { _, _ -> },
+  weeklySummary: WeeklyPerformanceSummary? = null,
+  onOpenAnalytics: (() -> Unit)? = null,
+  milestoneSummary: MilestoneSummary? = null,
+  onOpenMilestonesBadges: (() -> Unit)? = null
 ) {
   val colors = LocalHabitRadarColors.current
 
@@ -136,7 +149,9 @@ fun TodayTabScreen(
   }
 
   val availableGroups = remember(scheduledTodayAll) {
-    scheduledTodayAll.mapNotNull { it.group?.takeIf { g -> g.isNotBlank() } }.distinct()
+    scheduledTodayAll
+      .flatMap { it.allOrganizationLabels }
+      .distinctBy { it.lowercase() }
   }
 
   val filteredHabits = remember(
@@ -148,7 +163,7 @@ fun TodayTabScreen(
     today
   ) {
     scheduledTodayAll.filter { h ->
-      val groupMatch = settings.groupSections || settings.groupFilter == null || h.group.equals(settings.groupFilter, ignoreCase = true)
+      val groupMatch = settings.groupSections || settings.groupFilter == null || h.matchesCategoryOrTag(settings.groupFilter)
       val isDone = ScheduleMatcher.isEntryDone(h, entriesByHabit[h.id]?.get(today))
       val hideMatch = !settings.hideCompleted || !isDone
       groupMatch && hideMatch
@@ -163,7 +178,28 @@ fun TodayTabScreen(
   val completionPercent = if (totalScheduledCount > 0) ((doneScheduledCount.toDouble() / totalScheduledCount) * 100).roundToInt() else 0
 
   val allEntriesFlat = remember(entriesListByHabit) { entriesListByHabit.values.flatten() }
+  val allPausesFlat = remember(pausesByHabit) { pausesByHabit.values.flatten() }
   val dayRun = remember(allEntriesFlat, today) { StreakCalculator.calculateOverallDayRun(allEntriesFlat, today) }
+
+  val resolvedWeeklySummary = remember(weeklySummary, habits, allEntriesFlat, allPausesFlat, today, settings.weekStart) {
+    weeklySummary ?: WeeklyPerformanceCalculator.calculate(
+      habits = habits,
+      entries = allEntriesFlat,
+      pauses = allPausesFlat,
+      today = today,
+      weekStartDay = settings.weekStart
+    )
+  }
+
+  val resolvedMilestoneSummary = remember(milestoneSummary, habits, allEntriesFlat, allPausesFlat, today, settings.weekStart) {
+    milestoneSummary ?: MilestoneEngine.evaluateGlobalMilestones(
+      habits = habits,
+      entries = allEntriesFlat,
+      pauses = allPausesFlat,
+      today = today,
+      weekStartDay = settings.weekStart
+    )
+  }
 
   val greetingHeadline = remember(totalScheduledCount, doneScheduledCount, completionPercent) {
     when {
@@ -179,6 +215,7 @@ fun TodayTabScreen(
 
   var activeQuantitativeHabit by remember { mutableStateOf<Habit?>(null) }
   var activeNotePromptHabit by remember { mutableStateOf<Habit?>(null) }
+  var activeCompletionLogHabit by remember { mutableStateOf<Habit?>(null) }
   var oneThingFocusIndex by remember { mutableIntStateOf(0) }
   var pausedExpanded by remember { mutableStateOf(false) }
 
@@ -301,6 +338,21 @@ fun TodayTabScreen(
     }
 
     if (scheduledTodayAll.isEmpty() && pausedTodayHabits.isEmpty()) {
+      // Show weekly summary card at the top when enabled in Home Studio
+      if (settings.showWeeklyPerformanceCard) {
+        WeeklyPerformanceSummaryCard(
+          summary = resolvedWeeklySummary,
+          onOpenAnalytics = onOpenAnalytics,
+          modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+      }
+      if (settings.showMilestoneBadgesShelf) {
+        TodayMilestoneShelfCard(
+          milestoneSummary = resolvedMilestoneSummary,
+          onOpenBadgesGallery = { onOpenMilestonesBadges?.invoke() },
+          modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+        )
+      }
       // Empty State
       Box(
         contentAlignment = Alignment.Center,
@@ -373,10 +425,28 @@ fun TodayTabScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxSize()
       ) {
+        if (settings.showWeeklyPerformanceCard) {
+          item(key = "weekly_performance_summary_card_item") {
+            WeeklyPerformanceSummaryCard(
+              summary = resolvedWeeklySummary,
+              onOpenAnalytics = onOpenAnalytics
+            )
+          }
+        }
+
+        if (settings.showMilestoneBadgesShelf) {
+          item(key = "today_milestone_shelf_card_item") {
+            TodayMilestoneShelfCard(
+              milestoneSummary = resolvedMilestoneSummary,
+              onOpenBadgesGallery = { onOpenMilestonesBadges?.invoke() }
+            )
+          }
+        }
+
         when (settings.todayLayout) {
           TodayLayout.CLASSIC -> {
             if (settings.groupSections && availableGroups.isNotEmpty()) {
-              val grouped = filteredHabits.groupBy { it.group?.takeIf { g -> g.isNotBlank() } ?: "General" }
+              val grouped = filteredHabits.groupBy { it.resolvedCategory ?: "General" }
               grouped.forEach { (grpName, grpHabits) ->
                 item(key = "header_$grpName") {
                   SectionLabel(grpName, modifier = Modifier.padding(top = 6.dp))
@@ -396,6 +466,7 @@ fun TodayTabScreen(
                     showStreak = settings.showStreakToday,
                     onCardClick = { onOpenHabitDetail(habit.id) },
                     onCircleClick = { triggerHabitAction(habit) },
+                    onOpenCompletionLogger = { activeCompletionLogHabit = habit },
                     onEdit = { onEditHabit(habit) },
                     onSkip = { onSkipToday(habit) },
                     onPause = { onPauseHabitPrompt(habit) },
@@ -421,6 +492,7 @@ fun TodayTabScreen(
                   showStreak = settings.showStreakToday,
                   onCardClick = { onOpenHabitDetail(habit.id) },
                   onCircleClick = { triggerHabitAction(habit) },
+                  onOpenCompletionLogger = { activeCompletionLogHabit = habit },
                   onEdit = { onEditHabit(habit) },
                   onSkip = { onSkipToday(habit) },
                   onPause = { onPauseHabitPrompt(habit) },
@@ -708,6 +780,26 @@ fun TodayTabScreen(
       }
     )
   }
+
+  if (activeCompletionLogHabit != null) {
+    val lHabit = activeCompletionLogHabit!!
+    HabitCompletionLogBottomSheet(
+      habit = lHabit,
+      initialDate = today,
+      entries = entriesListByHabit[lHabit.id].orEmpty(),
+      pauses = pausesByHabit[lHabit.id].orEmpty(),
+      today = today,
+      onDismiss = { activeCompletionLogHabit = null },
+      onSaveLog = { log ->
+        onLogCompletion(log)
+        activeCompletionLogHabit = null
+      },
+      onClearDate = { date ->
+        onClearDateEntry(lHabit, date)
+        activeCompletionLogHabit = null
+      }
+    )
+  }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -721,6 +813,7 @@ private fun ClassicHabitCardRow(
   showStreak: Boolean,
   onCardClick: () -> Unit,
   onCircleClick: () -> Unit,
+  onOpenCompletionLogger: () -> Unit,
   onEdit: () -> Unit,
   onSkip: () -> Unit,
   onPause: () -> Unit,
@@ -805,8 +898,9 @@ private fun ClassicHabitCardRow(
         )
         if (showStreak) {
           Spacer(modifier = Modifier.height(3.dp))
+          val dateStampSuffix = if (isDone && entry != null) " · ${entry.dateStamp}" else ""
           Text(
-            text = "🔥 $streak ${if (streak == 1) "Day" else "Days"}",
+            text = "🔥 $streak ${if (streak == 1) "Day" else "Days"}$dateStampSuffix",
             fontFamily = PlusJakartaSansFamily,
             fontSize = 13.sp,
             color = colors.textSecondary
@@ -833,6 +927,10 @@ private fun ClassicHabitCardRow(
       expanded = showContextMenu,
       onDismissRequest = { showContextMenu = false }
     ) {
+      DropdownMenuItem(
+        text = { Text("Log completion (date-stamp)") },
+        onClick = { showContextMenu = false; onOpenCompletionLogger() }
+      )
       DropdownMenuItem(text = { Text("Edit") }, onClick = { showContextMenu = false; onEdit() })
       DropdownMenuItem(text = { Text("Skip today") }, onClick = { showContextMenu = false; onSkip() })
       DropdownMenuItem(text = { Text("Pause") }, onClick = { showContextMenu = false; onPause() })
@@ -857,7 +955,8 @@ fun WeeklyTabScreen(
   onOpenMenu: () -> Unit,
   onNewHabit: () -> Unit,
   onOpenHabitDetail: (String) -> Unit,
-  onToggleDate: (Habit, LocalDate) -> Unit
+  onToggleDate: (Habit, LocalDate) -> Unit,
+  onOpenAnalytics: (() -> Unit)? = null
 ) {
   val colors = LocalHabitRadarColors.current
   var weekOffset by remember { mutableIntStateOf(0) }
@@ -869,6 +968,19 @@ fun WeeklyTabScreen(
     (0..6).map { currentWeekStart.plusDays(it.toLong()) }
   }
   val weekEnd = weekDays.last()
+
+  val allEntriesFlat = remember(entriesListByHabit) { entriesListByHabit.values.flatten() }
+  val allPausesFlat = remember(pausesByHabit) { pausesByHabit.values.flatten() }
+  val weekSummary = remember(habits, allEntriesFlat, allPausesFlat, today, settings.weekStart, weekOffset) {
+    WeeklyPerformanceCalculator.calculate(
+      habits = habits,
+      entries = allEntriesFlat,
+      pauses = allPausesFlat,
+      today = today,
+      weekStartDay = settings.weekStart,
+      weekOffset = weekOffset
+    )
+  }
 
   val rangeFormatter = remember { DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH) }
   val rangeLabel = remember(currentWeekStart, weekEnd) {
@@ -908,6 +1020,13 @@ fun WeeklyTabScreen(
       verticalArrangement = Arrangement.spacedBy(14.dp),
       modifier = Modifier.fillMaxSize()
     ) {
+      item(key = "weekly_tab_summary_card") {
+        WeeklyPerformanceSummaryCard(
+          summary = weekSummary,
+          onOpenAnalytics = onOpenAnalytics
+        )
+      }
+
       items(habits, key = { it.id }) { habit ->
         val tint = habitTint(habit.colorKey, colors.isDark)
         val hEntries = entriesByHabit[habit.id].orEmpty()
@@ -1234,15 +1353,41 @@ fun OverallTabScreen(
   today: LocalDate,
   onOpenMenu: () -> Unit,
   onNewHabit: () -> Unit,
-  onOpenHabitDetail: (String) -> Unit
+  onOpenHabitDetail: (String) -> Unit,
+  onOpenDataVisualization: () -> Unit = {}
 ) {
   val colors = LocalHabitRadarColors.current
 
-  val allEntries = remember(entriesListByHabit) { entriesListByHabit.values.flatten() }
-  val totalCheckIns = remember(allEntries) { allEntries.count { it.status == EntryStatus.DONE } }
+  var selectedCategoryOrTag by remember { mutableStateOf<String?>(null) }
 
-  val habitStats = remember(habits, entriesByHabit, entriesListByHabit, pausesByHabit, today) {
-    habits.map { h ->
+  val availableCategoriesAndTags = remember(habits) {
+    val map = linkedMapOf<String, String>()
+    habits.forEach { h ->
+      h.allOrganizationLabels.forEach { label ->
+        val key = label.lowercase()
+        if (!map.containsKey(key)) {
+          map[key] = label
+        }
+      }
+    }
+    map.values.toList()
+  }
+
+  val filteredHabits = remember(habits, selectedCategoryOrTag) {
+    if (selectedCategoryOrTag.isNullOrBlank()) {
+      habits
+    } else {
+      habits.filter { it.matchesCategoryOrTag(selectedCategoryOrTag) }
+    }
+  }
+
+  val filteredEntries = remember(filteredHabits, entriesListByHabit) {
+    filteredHabits.flatMap { entriesListByHabit[it.id].orEmpty() }
+  }
+  val totalCheckIns = remember(filteredEntries) { filteredEntries.count { it.status == EntryStatus.DONE } }
+
+  val habitStats = remember(filteredHabits, entriesByHabit, entriesListByHabit, pausesByHabit, today) {
+    filteredHabits.map { h ->
       val s = StreakCalculator.calculateStreaks(h, entriesListByHabit[h.id].orEmpty(), pausesByHabit[h.id].orEmpty(), today)
       val rate = AnalyticsCalculator.computePeriodRate(
         h,
@@ -1261,16 +1406,29 @@ fun OverallTabScreen(
     habitStats.map { it.third }.average().roundToInt()
   } else 0
 
-  // 12-week completion % bar chart data
-  val twelveWeekRates = remember(habits, entriesByHabit, pausesByHabit, today) {
-    (11 downTo 0).map { w ->
-      val wEnd = today.minusDays((w * 7).toLong())
-      val wStart = wEnd.minusDays(6)
-      if (habits.isEmpty()) 0 else {
-        habits.map { h ->
-          AnalyticsCalculator.computePeriodRate(h, entriesByHabit[h.id].orEmpty(), pausesByHabit[h.id].orEmpty(), wStart, wEnd)
-        }.average().roundToInt()
-      }
+  var inlineTimeframe by remember {
+    mutableStateOf(com.example.feature.analytics.VisualizationTimeframe.WEEKLY)
+  }
+  var inlineSelectedBarIdx by remember { mutableIntStateOf(-1) }
+
+  val inlineChartSummary = remember(filteredHabits, entriesByHabit, pausesByHabit, inlineTimeframe, today) {
+    if (inlineTimeframe == com.example.feature.analytics.VisualizationTimeframe.WEEKLY) {
+      com.example.feature.analytics.CompletionRateChartCalculator.computeWeeklyMultiWeekSeries(
+        habits = filteredHabits,
+        entriesByHabit = entriesByHabit,
+        pausesByHabit = pausesByHabit,
+        weekStart = com.example.core.domain.model.WeekStartDay.MONDAY,
+        today = today,
+        weeksCount = 8
+      )
+    } else {
+      com.example.feature.analytics.CompletionRateChartCalculator.computeMonthlySeries(
+        habits = filteredHabits,
+        entriesByHabit = entriesByHabit,
+        pausesByHabit = pausesByHabit,
+        today = today,
+        monthsCount = 6
+      )
     }
   }
 
@@ -1287,163 +1445,339 @@ fun OverallTabScreen(
     )
 
     LazyColumn(
-      contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 132.dp),
-      verticalArrangement = Arrangement.spacedBy(14.dp),
+      contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 128.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
       modifier = Modifier.fillMaxSize()
     ) {
-      // Stat cards grid (Section 4.4)
-      item {
-        Row(
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
-          modifier = Modifier.fillMaxWidth()
-        ) {
-          OverallStatCard(
-            label = "TOTAL CHECK-INS",
-            value = totalCheckIns.toString(),
-            modifier = Modifier.weight(1f)
-          )
-          OverallStatCard(
-            label = "OVERALL RATE",
-            value = "$overallCompletionRate%",
-            modifier = Modifier.weight(1f)
-          )
-        }
-      }
-      item {
-        Row(
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
-          modifier = Modifier.fillMaxWidth()
-        ) {
-          OverallStatCard(
-            label = "CURRENT BEST",
-            value = "🔥 $bestCurrentStreak d",
-            modifier = Modifier.weight(1f)
-          )
-          OverallStatCard(
-            label = "LONGEST STREAK",
-            value = "$longestStreakEver d",
-            modifier = Modifier.weight(1f)
-          )
-          OverallStatCard(
-            label = "ACTIVE HABITS",
-            value = habits.size.toString(),
-            modifier = Modifier.weight(1f)
-          )
-        }
-      }
-
-      // Bar chart: completion % per week, last 12 weeks
-      item {
-        HabitRadarCard {
-          SectionLabel("LAST 12 WEEKS COMPLETION %")
-          Spacer(modifier = Modifier.height(8.dp))
-          Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.Bottom,
+      // Compact category/tag pill filter (only shown when categories or tags exist)
+      if (availableCategoriesAndTags.isNotEmpty()) {
+        item {
+          LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
               .fillMaxWidth()
-              .height(120.dp)
+              .testTag("overall_category_filter_row")
           ) {
-            twelveWeekRates.forEachIndexed { idx, rate ->
+            item {
+              val allSelected = selectedCategoryOrTag == null
               Box(
-                contentAlignment = Alignment.BottomCenter,
                 modifier = Modifier
-                  .weight(1f)
-                  .fillMaxHeight()
-                  .clip(RoundedCornerShape(8.dp))
-                  .background(colors.surface2)
+                  .clip(RoundedCornerShape(16.dp))
+                  .background(if (allSelected) colors.accent else colors.surface2)
+                  .clickable {
+                    selectedCategoryOrTag = null
+                    inlineSelectedBarIdx = -1
+                  }
+                  .padding(horizontal = 12.dp, vertical = 6.dp)
+                  .testTag("overall_category_chip_all")
               ) {
-                Box(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight((rate / 100f).coerceIn(0.06f, 1f))
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (idx == 11) colors.accent else colors.accent.copy(alpha = 0.55f))
+                Text(
+                  text = "All",
+                  fontFamily = PlusJakartaSansFamily,
+                  fontSize = 12.sp,
+                  fontWeight = if (allSelected) FontWeight.Bold else FontWeight.Medium,
+                  color = if (allSelected) colors.onAccent else colors.textSecondary
+                )
+              }
+            }
+
+            items(availableCategoriesAndTags) { label ->
+              val isSelected = selectedCategoryOrTag != null && selectedCategoryOrTag.equals(label, ignoreCase = true)
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(16.dp))
+                  .background(if (isSelected) colors.accent else colors.surface2)
+                  .clickable {
+                    selectedCategoryOrTag = if (isSelected) null else label
+                    inlineSelectedBarIdx = -1
+                  }
+                  .padding(horizontal = 12.dp, vertical = 6.dp)
+                  .testTag("overall_category_chip_${label.lowercase().replace(" ", "_")}")
+              ) {
+                Text(
+                  text = label,
+                  fontFamily = PlusJakartaSansFamily,
+                  fontSize = 12.sp,
+                  fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                  color = if (isSelected) colors.onAccent else colors.textSecondary
                 )
               }
             }
           }
-          Spacer(modifier = Modifier.height(6.dp))
+        }
+      }
+
+      // Unified At-a-Glance Summary Card: all core metrics in one clean view
+      item {
+        HabitRadarCard(
+          contentPadding = PaddingValues(18.dp),
+          modifier = Modifier.testTag("overall_summary_hero_card")
+        ) {
+          Row(
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column {
+              Text(
+                text = "OVERALL COMPLETION",
+                fontSize = 10.sp,
+                letterSpacing = 1.4.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textSecondary
+              )
+              Spacer(modifier = Modifier.height(2.dp))
+              Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                  text = "$overallCompletionRate%",
+                  fontFamily = InstrumentSerifFamily,
+                  fontSize = 42.sp,
+                  lineHeight = 44.sp,
+                  color = colors.textPrimary
+                )
+                if (selectedCategoryOrTag != null) {
+                  Spacer(modifier = Modifier.width(8.dp))
+                  Text(
+                    text = "· $selectedCategoryOrTag",
+                    fontFamily = PlusJakartaSansFamily,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = colors.accent,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                  )
+                }
+              }
+            }
+
+            Box(
+              contentAlignment = Alignment.Center,
+              modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(colors.accentContainer)
+                .clickable(onClick = onOpenDataVisualization)
+                .padding(horizontal = 12.dp, vertical = 7.dp)
+                .testTag("open_data_visualization_button")
+            ) {
+              Text(
+                text = "Charts →",
+                fontFamily = PlusJakartaSansFamily,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = colors.accent
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          // Sleek overall progress bar
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(6.dp)
+              .clip(RoundedCornerShape(3.dp))
+              .background(colors.surface2)
+          ) {
+            Box(
+              modifier = Modifier
+                .fillMaxWidth((overallCompletionRate / 100f).coerceIn(0.03f, 1f))
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(3.dp))
+                .background(colors.accent)
+            )
+          }
+
+          Spacer(modifier = Modifier.height(14.dp))
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(1.dp)
+              .background(colors.borderSubtle)
+          )
+          Spacer(modifier = Modifier.height(12.dp))
+
+          // 4 compact inline metrics in one row
           Row(
             horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier.fillMaxWidth()
           ) {
-            Text("12w ago", fontSize = 11.sp, color = colors.textSecondary)
-            Text("6w ago", fontSize = 11.sp, color = colors.textSecondary)
-            Text("This week", fontSize = 11.sp, color = colors.accent, fontWeight = FontWeight.SemiBold)
+            OverallCompactMetric(
+              label = "Check-ins",
+              value = totalCheckIns.toString(),
+              modifier = Modifier.weight(1f)
+            )
+            OverallCompactMetric(
+              label = "Current",
+              value = "🔥 ${bestCurrentStreak}d",
+              modifier = Modifier.weight(1f)
+            )
+            OverallCompactMetric(
+              label = "Best",
+              value = "${longestStreakEver}d",
+              modifier = Modifier.weight(1f)
+            )
+            OverallCompactMetric(
+              label = "Habits",
+              value = filteredHabits.size.toString(),
+              modifier = Modifier.weight(1f)
+            )
           }
         }
       }
 
-      // Per-habit list: icon, title, completion-rate bar (habit color), current / best streak
+      // Clean, distraction-free Trend Card
       item {
-        SectionLabel("HABIT PERFORMANCE", modifier = Modifier.padding(top = 6.dp))
-      }
-
-      items(habitStats, key = { it.first.id }) { (habit, streakSummary, rate) ->
-        val tint = habitTint(habit.colorKey, colors.isDark)
-        HabitRadarCard(
-          backgroundColor = tint.cardBackground,
-          onClick = { onOpenHabitDetail(habit.id) }
-        ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-              contentAlignment = Alignment.Center,
-              modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(tint.iconTileBackground)
-            ) {
-              HabitIconView(iconKey = habit.iconKey, tint = tint.baseColor)
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-              Row(
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-              ) {
-                Text(
-                  text = habit.name,
-                  fontFamily = PlusJakartaSansFamily,
-                  fontSize = 17.sp,
-                  fontWeight = FontWeight.SemiBold,
-                  color = colors.textPrimary
-                )
-                Text(
-                  text = "$rate%",
-                  fontFamily = PlusJakartaSansFamily,
-                  fontSize = 15.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = tint.baseColor
-                )
-              }
-              Spacer(modifier = Modifier.height(6.dp))
-              Box(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .height(8.dp)
-                  .clip(RoundedCornerShape(4.dp))
-                  .background(colors.surface2)
-              ) {
+        HabitRadarCard(contentPadding = PaddingValues(16.dp)) {
+          Row(
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Text(
+              text = "TREND",
+              fontSize = 10.sp,
+              letterSpacing = 1.4.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = colors.textSecondary
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              com.example.feature.analytics.VisualizationTimeframe.entries.forEach { tf ->
+                val isSel = inlineTimeframe == tf
                 Box(
                   modifier = Modifier
-                    .fillMaxWidth((rate / 100f).coerceIn(0.04f, 1f))
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(tint.baseColor)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (isSel) colors.accent else colors.surface2)
+                    .clickable {
+                      inlineTimeframe = tf
+                      inlineSelectedBarIdx = -1
+                    }
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .testTag("overall_chart_toggle_${tf.name.lowercase()}")
+                ) {
+                  Text(
+                    text = tf.label,
+                    fontSize = 11.sp,
+                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isSel) colors.onAccent else colors.textSecondary
+                  )
+                }
+              }
+            }
+          }
+
+          Spacer(modifier = Modifier.height(8.dp))
+
+          com.example.feature.analytics.RechartsBarChart(
+            data = inlineChartSummary.dataPoints,
+            primaryBarColor = colors.accent,
+            showComparisonBars = false,
+            showAverageReferenceLine = true,
+            averageRate = inlineChartSummary.averageRate,
+            selectedBarIndex = inlineSelectedBarIdx,
+            onSelectBarIndex = { inlineSelectedBarIdx = it }
+          )
+        }
+      }
+
+      // Clean, compact Per-Habit rows
+      if (habitStats.isNotEmpty()) {
+        item {
+          SectionLabel("HABITS", modifier = Modifier.padding(top = 2.dp))
+        }
+
+        items(habitStats, key = { it.first.id }) { (habit, streakSummary, rate) ->
+          val tint = habitTint(habit.colorKey, colors.isDark)
+          val categoryPrefix = habit.resolvedCategory?.let { "$it · " } ?: ""
+          HabitRadarCard(
+            backgroundColor = tint.cardBackground,
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+            onClick = { onOpenHabitDetail(habit.id) }
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                  .size(40.dp)
+                  .clip(RoundedCornerShape(12.dp))
+                  .background(tint.iconTileBackground)
+              ) {
+                HabitIconView(iconKey = habit.iconKey, tint = tint.baseColor)
+              }
+              Spacer(modifier = Modifier.width(12.dp))
+              Column(modifier = Modifier.weight(1f)) {
+                Row(
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier = Modifier.fillMaxWidth()
+                ) {
+                  Text(
+                    text = habit.name,
+                    fontFamily = PlusJakartaSansFamily,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.textPrimary,
+                    maxLines = 1
+                  )
+                  Text(
+                    text = "$rate%",
+                    fontFamily = PlusJakartaSansFamily,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = tint.baseColor
+                  )
+                }
+                Spacer(modifier = Modifier.height(5.dp))
+                Box(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(2.5.dp))
+                    .background(colors.surface2)
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .fillMaxWidth((rate / 100f).coerceIn(0.04f, 1f))
+                      .fillMaxHeight()
+                      .clip(RoundedCornerShape(2.5.dp))
+                      .background(tint.baseColor)
+                  )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                  text = "${categoryPrefix}🔥 ${streakSummary.currentStreak}d · Best ${streakSummary.bestStreak}d",
+                  fontSize = 11.sp,
+                  color = colors.textSecondary,
+                  maxLines = 1
                 )
               }
-              Spacer(modifier = Modifier.height(6.dp))
-              Text(
-                text = "Current: 🔥 ${streakSummary.currentStreak}d · Best: ${streakSummary.bestStreak}d",
-                fontSize = 12.sp,
-                color = colors.textSecondary
-              )
             }
           }
         }
       }
     }
+  }
+}
+
+@Composable
+private fun OverallCompactMetric(
+  label: String,
+  value: String,
+  modifier: Modifier = Modifier
+) {
+  val colors = LocalHabitRadarColors.current
+  Column(modifier = modifier) {
+    Text(
+      text = value,
+      fontFamily = PlusJakartaSansFamily,
+      fontSize = 16.sp,
+      fontWeight = FontWeight.Bold,
+      color = colors.textPrimary
+    )
+    Text(
+      text = label,
+      fontSize = 11.sp,
+      color = colors.textSecondary
+    )
   }
 }
 
