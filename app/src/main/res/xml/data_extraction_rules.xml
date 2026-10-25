@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="database" path="." />
+        <include domain="file" path="datastore" />
+        <exclude domain="file" path="pre_restore_snapshot.json" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="database" path="." />
+        <include domain="file" path="datastore" />
+        <exclude domain="file" path="pre_restore_snapshot.json" />
+    </device-transfer>
+</data-extraction-rules>

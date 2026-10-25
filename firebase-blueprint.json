@@ -1,0 +1,130 @@
+{
+  "entities": {
+    "CloudHabit": {
+      "title": "CloudHabit",
+      "description": "A user-owned habit synced to Firebase Firestore.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the authenticated owner."
+        },
+        "title": {
+          "type": "string",
+          "description": "Display title of the habit (1-200 chars)."
+        },
+        "category": {
+          "type": "string",
+          "description": "Category name (1-100 chars)."
+        },
+        "iconName": {
+          "type": "string",
+          "description": "Material icon identifier."
+        },
+        "colorHex": {
+          "type": "string",
+          "description": "Pastel hex color string."
+        },
+        "frequencyType": {
+          "type": "string",
+          "description": "DAILY, DAYS_OF_WEEK, INTERVAL, or X_PER_PERIOD."
+        },
+        "targetPerDay": {
+          "type": "integer",
+          "description": "Daily completion target (>= 1)."
+        },
+        "isArchived": {
+          "type": "boolean",
+          "description": "Whether the habit is archived."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last modification server timestamp."
+        }
+      },
+      "required": [
+        "userId",
+        "title",
+        "category",
+        "iconName",
+        "colorHex",
+        "frequencyType",
+        "targetPerDay",
+        "isArchived",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CloudEntry": {
+      "title": "CloudEntry",
+      "description": "A user-owned habit completion entry synced to Firebase Firestore.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the authenticated owner."
+        },
+        "habitId": {
+          "type": "string",
+          "description": "Associated habit identifier."
+        },
+        "date": {
+          "type": "string",
+          "description": "ISO-8601 local date (YYYY-MM-DD)."
+        },
+        "status": {
+          "type": "string",
+          "description": "COMPLETED, PARTIAL, SKIPPED, or MISSED."
+        },
+        "count": {
+          "type": "integer",
+          "description": "Completion count (>= 0)."
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional note text (0-500 chars)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last modification server timestamp."
+        }
+      },
+      "required": [
+        "userId",
+        "habitId",
+        "date",
+        "status",
+        "count",
+        "note",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/habits/{habitId}": {
+      "schema": {
+        "$ref": "#/entities/CloudHabit"
+      },
+      "description": "User-scoped habits collection."
+    },
+    "/users/{userId}/entries/{entryId}": {
+      "schema": {
+        "$ref": "#/entities/CloudEntry"
+      },
+      "description": "User-scoped habit completion entries collection."
+    }
+  }
+}

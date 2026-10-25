@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function isValidHabit(data, userId) {
+      let allowedKeys = [
+        'userId', 'title', 'category', 'iconName', 'colorHex',
+        'frequencyType', 'targetPerDay', 'isArchived', 'createdAt', 'updatedAt'
+      ];
+      return data.keys().hasAll(allowedKeys)
+        && data.keys().hasOnly(allowedKeys)
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 100
+        && data.iconName is string && data.iconName.size() >= 1 && data.iconName.size() <= 64
+        && data.colorHex is string && data.colorHex.size() >= 1 && data.colorHex.size() <= 16
+        && data.frequencyType is string && data.frequencyType in ['DAILY', 'DAYS_OF_WEEK', 'INTERVAL', 'X_PER_PERIOD']
+        && data.targetPerDay is int && data.targetPerDay >= 1 && data.targetPerDay <= 1000
+        && data.isArchived is bool
+        && data.createdAt is timestamp && data.createdAt <= request.time
+        && data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidEntry(data, userId) {
+      let allowedKeys = [
+        'userId', 'habitId', 'date', 'status', 'count', 'note', 'createdAt', 'updatedAt'
+      ];
+      return data.keys().hasAll(allowedKeys)
+        && data.keys().hasOnly(allowedKeys)
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.habitId is string && data.habitId.size() >= 1 && data.habitId.size() <= 128
+        && data.date is string && data.date.size() == 10
+        && data.status is string && data.status in ['COMPLETED', 'PARTIAL', 'SKIPPED', 'MISSED']
+        && data.count is int && data.count >= 0 && data.count <= 10000
+        && data.note is string && data.note.size() <= 500
+        && data.createdAt is timestamp && data.createdAt <= request.time
+        && data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    match /users/{userId}/habits/{habitId} {
+      allow get: if isOwner(userId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && isValidId(habitId)
+        && isValidHabit(incoming(), userId);
+      allow update: if isOwner(userId)
+        && isValidId(habitId)
+        && isValidHabit(incoming(), userId)
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'category', 'iconName', 'colorHex',
+          'frequencyType', 'targetPerDay', 'isArchived', 'updatedAt'
+        ]);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/entries/{entryId} {
+      allow get: if isOwner(userId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && isValidId(entryId)
+        && isValidEntry(incoming(), userId);
+      allow update: if isOwner(userId)
+        && isValidId(entryId)
+        && isValidEntry(incoming(), userId)
+        && incoming().userId == existing().userId
+        && incoming().habitId == existing().habitId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'date', 'status', 'count', 'note', 'updatedAt'
+        ]);
+      allow delete: if isOwner(userId);
+    }
+  }
+}

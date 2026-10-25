@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Habit Radar</string>
+    <string name="tab_today">Aujourd\'hui</string>
+    <string name="tab_weekly">Semaine</string>
+    <string name="tab_monthly">Mois</string>
+    <string name="tab_overall">Global</string>
+    <string name="menu_title">Menu</string>
+    <string name="menu_notifications">Notifications</string>
+    <string name="menu_settings">Paramètres</string>
+    <string name="menu_weekly_recap">Bilan hebdomadaire</string>
+    <string name="menu_monthly_recap">Bilan mensuel</string>
+    <string name="menu_year_in_review">Rétrospective annuelle</string>
+    <string name="menu_milestones">Jalons</string>
+    <string name="menu_widgets">Widgets</string>
+    <string name="menu_add_to_home">Ajouter à l\'écran d\'accueil</string>
+    <string name="settings_home_studio">Home Studio</string>
+    <string name="settings_home_studio_sub">Thème, couleurs et disposition d\'accueil au même endroit.</string>
+    <string name="settings_preferences">PRÉFÉRENCES</string>
+    <string name="settings_data">DONNÉES</string>
+    <string name="settings_week_start">Début de semaine</string>
+    <string name="settings_week_start_sub">S\'applique à toutes les grilles et bilans</string>
+    <string name="settings_sounds">Sons</string>
+    <string name="settings_sounds_sub">Un léger déclic lorsque vous validez une habitude</string>
+    <string name="settings_daily_nudges">Rappels quotidiens</string>
+    <string name="settings_daily_nudges_sub">Un élan le matin et un rappel le soir — jamais plus.</string>
+    <string name="settings_card_density">Densité des cartes</string>
+    <string name="settings_reorder_habits">Réorganiser les habitudes</string>
+    <string name="settings_show_streak_on">Afficher la série sur</string>
+    <string name="settings_show_hijri">Afficher la date hégirienne</string>
+    <string name="settings_day_starts_at">La journée commence à</string>
+    <string name="settings_day_starts_at_sub">Les validations tardives comptent pour la veille jusqu\'à cette heure</string>
+    <string name="settings_change_language">Changer de langue</string>
+    <string name="settings_backup_restore">Sauvegarde et restauration</string>
+    <string name="settings_archived_habits">Habitudes archivées</string>
+    <string name="settings_welcome_tour">Visite de bienvenue</string>
+    <string name="settings_offline_footer">Habit Radar fonctionne entièrement hors ligne. Rien ne quitte votre téléphone sauf si vous exportez une sauvegarde.</string>
+    <string name="widget_week_grid_desc">Grille de 7 jours avec séries et validation directe</string>
+    <string name="widget_today_list_desc">Liste du jour avec bande de progression</string>
+    <string name="widget_progress_ring_desc">Anneau de progression et série quotidienne</string>
+    <string name="widget_single_habit_desc">Focus sur une habitude avec 7 jours</string>
+    <string name="widget_goal_desc">Suivre les étapes d\'un objectif</string>
+</resources>

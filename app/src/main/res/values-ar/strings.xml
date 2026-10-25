@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">رادار العادات</string>
+    <string name="tab_today">اليوم</string>
+    <string name="tab_weekly">أسبوعي</string>
+    <string name="tab_monthly">شهري</string>
+    <string name="tab_overall">الإجمالي</string>
+    <string name="menu_title">القائمة</string>
+    <string name="menu_notifications">الإشعارات</string>
+    <string name="menu_settings">الإعدادات</string>
+    <string name="menu_weekly_recap">الملخص الأسبوعي</string>
+    <string name="menu_monthly_recap">الملخص الشهري</string>
+    <string name="menu_year_in_review">حصاد العام</string>
+    <string name="menu_milestones">الأهداف الكبرى</string>
+    <string name="menu_widgets">الأدوات المصغرة</string>
+    <string name="menu_add_to_home">إضافة للشاشة الرئيسية</string>
+    <string name="settings_home_studio">استوديو الواجهة</string>
+    <string name="settings_home_studio_sub">المظهر والألوان وتخطيط الشاشة في مكان واحد.</string>
+    <string name="settings_preferences">التفضيلات</string>
+    <string name="settings_data">البيانات</string>
+    <string name="settings_week_start">بداية الأسبوع</string>
+    <string name="settings_week_start_sub">يؤثر على كل الجداول والملخصات</string>
+    <string name="settings_sounds">الأصوات</string>
+    <string name="settings_sounds_sub">صوت خفيف عند إتمام عادة</string>
+    <string name="settings_daily_nudges">التذكيرات اليومية</string>
+    <string name="settings_daily_nudges_sub">تذكير صباحي وواحد مسائي فقط.</string>
+    <string name="settings_card_density">حجم البطاقات</string>
+    <string name="settings_reorder_habits">ترتيب العادات</string>
+    <string name="settings_show_streak_on">إظهار رمز السلسلة في</string>
+    <string name="settings_show_hijri">إظهار التاريخ الهجري</string>
+    <string name="settings_day_starts_at">يبدأ اليوم عند</string>
+    <string name="settings_day_starts_at_sub">الإنجازات المتأخرة ليلاً تُحتسب لليوم السابق حتى هذا الوقت</string>
+    <string name="settings_change_language">تغيير اللغة</string>
+    <string name="settings_backup_restore">النسخ الاحتياطي والاستعادة</string>
+    <string name="settings_archived_habits">العادات المؤرشفة</string>
+    <string name="settings_welcome_tour">جولة الترحيب</string>
+    <string name="settings_offline_footer">يعمل رادار العادات بدون إنترنت تماماً. لا تغادر بياناتك هاتفك إلا عند تصدير نسخة احتياطية.</string>
+    <string name="widget_week_grid_desc">جدول أسبوعي مع السلاسل ودوائر الإنجاز</string>
+    <string name="widget_today_list_desc">قائمة مهام اليوم مع شريط التقدم</string>
+    <string name="widget_progress_ring_desc">حلقة الإنجاز اليومي والسلسلة المتتالية</string>
+    <string name="widget_single_habit_desc">التركيز على عادة واحدة مع شريط الأسبوع</string>
+    <string name="widget_goal_desc">متابعة خطوات الهدف وإتمامها</string>
+</resources>
