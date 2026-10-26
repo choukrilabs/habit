@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for the Milestone Badge & Achievement Tracking System, covering streak, total-completion, and perfect-week/consistency badges, dedicated Badges gallery + Today/Habit Detail shelves, and an instant unlock celebration modal.",
-  "updatedAt":  "2026-10-25T15:33:22.601858255Z",
+  "summary":  "Implementation plan for adding automated GitHub Release APK publishing (signed release + debug APKs) via GitHub Actions and expanding README.md into a comprehensive project & release guide.",
+  "updatedAt":  "2026-10-26T20:07:53.455342366Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
